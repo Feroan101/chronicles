@@ -1,0 +1,129 @@
+import json
+import re
+import shutil
+from pathlib import Path
+
+import pytest
+from chronicle.cli import context
+from chronicle.cli.main import app
+from typer.testing import CliRunner
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+runner = CliRunner()
+
+
+@pytest.fixture()
+def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    shutil.copy2(REPO_ROOT / "alembic.ini", tmp_path / "alembic.ini")
+    shutil.copytree(REPO_ROOT / "alembic", tmp_path / "alembic")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def _first_uuid(text: str) -> str:
+    return UUID_RE.search(text).group()
+
+
+def _init(project_dir: Path) -> None:
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+
+
+def test_init_creates_dir_db_and_config(project_dir: Path):
+    _init(project_dir)
+    assert context.chronicle_dir().is_dir()
+    assert context.db_path().is_file()
+    assert context.config_path().is_file()
+    config = json.loads(context.config_path().read_text())
+    assert config["db"] == "chronicle.db"
+
+
+def test_command_without_init_fails(project_dir: Path):
+    result = runner.invoke(app, ["project", "create", "demo"])
+    assert result.exit_code == 1
+    assert "not initialized" in result.output
+
+
+def test_project_create(project_dir: Path):
+    _init(project_dir)
+    result = runner.invoke(app, ["project", "create", "demo", "--description", "x"])
+    assert result.exit_code == 0, result.output
+    assert "demo" in result.output
+    assert _first_uuid(result.output)
+
+
+def test_memory_workflow(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+
+    created = runner.invoke(
+        app,
+        [
+            "memory",
+            "create",
+            "--project-id",
+            project_id,
+            "--content",
+            "first",
+            "--type",
+            "fact",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    memory_id = _first_uuid(created.output)
+    assert "current version: 1" in created.output
+
+    listed = runner.invoke(app, ["memory", "list", "--project-id", project_id])
+    assert listed.exit_code == 0
+    assert "seq 1" in listed.output
+
+    shown = runner.invoke(app, ["memory", "show", "--memory-id", memory_id])
+    assert shown.exit_code == 0, shown.output
+    assert "first" in shown.output
+    assert "Current version (sequence 1)" in shown.output
+
+
+def test_version_create_appends_history(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+    memory_id = _first_uuid(
+        runner.invoke(
+            app,
+            [
+                "memory",
+                "create",
+                "--project-id",
+                project_id,
+                "--content",
+                "v1",
+            ],
+        ).output
+    )
+
+    result = runner.invoke(
+        app,
+        ["version", "create", "--memory-id", memory_id, "--content", "v2"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "sequence: 2" in result.output
+
+    shown = runner.invoke(app, ["memory", "show", "--memory-id", memory_id])
+    assert "Current version (sequence 2)" in shown.output
+    assert "v2" in shown.output
+
+
+def test_unknown_project_and_memory_errors(project_dir: Path):
+    _init(project_dir)
+
+    bad_project = runner.invoke(
+        app, ["memory", "create", "--project-id", "bad-id", "--content", "x"]
+    )
+    assert bad_project.exit_code == 1
+    assert "Project not found" in bad_project.output
+
+    bad_memory = runner.invoke(
+        app, ["version", "create", "--memory-id", "bad-id", "--content", "x"]
+    )
+    assert bad_memory.exit_code == 1
+    assert "Memory not found" in bad_memory.output

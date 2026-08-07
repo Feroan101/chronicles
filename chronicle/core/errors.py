@@ -1,0 +1,14 @@
+class ChronicleError(Exception):
+    """Base class for all Chronicle Core errors."""
+
+
+class ProjectNotFoundError(ChronicleError):
+    def __init__(self, project_id: str) -> None:
+        super().__init__(f"Project not found: {project_id}")
+        self.project_id = project_id
+
+
+class MemoryNotFoundError(ChronicleError):
+    def __init__(self, memory_id: str) -> None:
+        super().__init__(f"Memory not found: {memory_id}")
+        self.memory_id = memory_id
