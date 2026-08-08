@@ -129,6 +129,20 @@ def test_search_invalid_fts_query_raises(engine, project):
     with pytest.raises(SearchQueryError):
         _search(engine, '"unterminated')
 
+    with pytest.raises(SearchQueryError):
+        _search(engine, 'quote"inside')
+
+
+def test_search_fts_operators_are_literal_terms(engine, project):
+    memory = engine.create_memory(
+        project_id=project.id, content="select one and two or three not four"
+    )
+
+    for term in ("and", "or", "not"):
+        results = _search(engine, term)
+        assert len(results) == 1, term
+        assert results[0].memory.id == memory.id, term
+
 
 def test_search_does_not_modify_data(store, project):
     db_path, engine = store

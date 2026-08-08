@@ -129,6 +129,8 @@ class ChronicleEngine:
         """
         if not query or not query.strip():
             raise SearchQueryError(query)
+        if '"' in query:
+            raise SearchQueryError(query)
         with self._transaction() as session:
             try:
                 rows = MemoryRepository(session).search(query, project_id)
