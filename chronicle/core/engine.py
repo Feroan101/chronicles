@@ -17,7 +17,17 @@ from chronicle.core.errors import (
     SelfRelationshipError,
 )
 from chronicle.core.git import GitContext
-from chronicle.models import Evidence, Memory, MemoryVersion, Observation, Project, Relationship
+from chronicle.models import (
+    Evidence,
+    Memory,
+    MemoryVersion,
+    Observation,
+    Project,
+    Relationship,
+    Snapshot,
+    SnapshotMember,
+    SnapshotRelationship,
+)
 from chronicle.storage import (
     EvidenceRepository,
     MemoryRepository,
@@ -25,6 +35,9 @@ from chronicle.storage import (
     ObservationRepository,
     ProjectRepository,
     RelationshipRepository,
+    SnapshotMemberRepository,
+    SnapshotRelationshipRepository,
+    SnapshotRepository,
 )
 from chronicle.utils.ids import new_uuid
 from chronicle.utils.time import utcnow
@@ -308,7 +321,7 @@ class ChronicleEngine:
     ) -> Relationship:
         """Create a directed, typed Relationship between two Memories."""
         if from_memory_id == to_memory_id:
-            raise SelfRelationshipError()
+            raise SelfRelationshipError(from_memory_id)
 
         with self._transaction() as session:
             if ProjectRepository(session).get(project_id) is None:
@@ -354,3 +367,74 @@ class ChronicleEngine:
         with self._transaction() as session:
             if not RelationshipRepository(session).delete(relationship_id):
                 raise RelationshipNotFoundError(relationship_id)
+
+    # ------------------------------------------------------------------
+    # Snapshot operations
+    # ------------------------------------------------------------------
+
+    def create_snapshot(self, project_id: str, message: str | None = None) -> Snapshot:
+        """Create a Snapshot of the Project's current knowledge state."""
+        with self._transaction() as session:
+            project = ProjectRepository(session).get(project_id)
+            if project is None:
+                raise ProjectNotFoundError(project_id)
+
+            snapshot = Snapshot(
+                id=new_uuid(),
+                project_id=project_id,
+                message=message,
+                created_at=utcnow(),
+            )
+            SnapshotRepository(session).create(snapshot)
+
+            memories = MemoryRepository(session).list_by_project(project_id)
+            members: list[SnapshotMember] = []
+            for memory in memories:
+                current_version = MemoryVersionRepository(session).highest_version(memory.id)
+                if current_version is not None:
+                    members.append(
+                        SnapshotMember(
+                            snapshot_id=snapshot.id,
+                            memory_version_id=current_version.id,
+                        )
+                    )
+            if members:
+                SnapshotMemberRepository(session).create_many(members)
+
+            relationships = RelationshipRepository(session).list_by_project(project_id)
+            snapshot_rels: list[SnapshotRelationship] = []
+            for rel in relationships:
+                snapshot_rels.append(
+                    SnapshotRelationship(
+                        snapshot_id=snapshot.id,
+                        relationship_id=rel.id,
+                        from_memory_id=rel.from_memory_id,
+                        to_memory_id=rel.to_memory_id,
+                        type=rel.type,
+                    )
+                )
+            if snapshot_rels:
+                SnapshotRelationshipRepository(session).create_many(snapshot_rels)
+
+            session.flush()
+            _ = snapshot.members
+            _ = snapshot.snapshot_relationships
+            return snapshot
+
+    def get_snapshot(self, snapshot_id: str) -> Snapshot | None:
+        """Retrieve a specific Snapshot."""
+        with self._transaction() as session:
+            snapshot = SnapshotRepository(session).get(snapshot_id)
+            if snapshot is not None:
+                _ = snapshot.members
+                _ = snapshot.snapshot_relationships
+            return snapshot
+
+    def list_snapshots(self, project_id: str) -> list[Snapshot]:
+        """List all Snapshots for a Project."""
+        with self._transaction() as session:
+            snapshots = SnapshotRepository(session).list_by_project(project_id)
+            for snapshot in snapshots:
+                _ = snapshot.members
+                _ = snapshot.snapshot_relationships
+            return snapshots

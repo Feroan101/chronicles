@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from chronicle.models.memory import Memory
     from chronicle.models.observation import Observation
     from chronicle.models.relationship import Relationship
+    from chronicle.models.snapshot import Snapshot
 
 
 class Project(Base):
@@ -30,5 +31,8 @@ class Project(Base):
         back_populates="project", cascade="all, delete-orphan"
     )
     observations: Mapped[list[Observation]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    snapshots: Mapped[list[Snapshot]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )

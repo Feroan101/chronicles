@@ -13,12 +13,14 @@ from chronicle.api.schemas import (
     ProjectRead,
     RelationshipRead,
     SearchHitRead,
+    SnapshotRead,
 )
 from chronicle.core import (
     ChronicleEngine,
     GitContext,
     MemoryNotFoundError,
     ProjectNotFoundError,
+    SnapshotNotFoundError,
 )
 
 DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
@@ -55,6 +57,10 @@ def _observation(observation) -> dict:
 
 def _relationship(relationship) -> dict:
     return RelationshipRead.model_validate(relationship).model_dump(mode="json")
+
+
+def _snapshot(snapshot) -> dict:
+    return SnapshotRead.model_validate(snapshot).model_dump(mode="json")
 
 
 def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> FastMCP:
@@ -325,6 +331,41 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             relationship_id: The relationship ID.
         """
         engine.remove_relationship(relationship_id)
+
+    # ------------------------------------------------------------------
+    # Snapshot tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def create_snapshot(project_id: str, message: str | None = None) -> dict:
+        """Create a snapshot of the project's current knowledge state.
+
+        Args:
+            project_id: The project ID to snapshot.
+            message: An optional message describing the snapshot.
+        """
+        return _snapshot(engine.create_snapshot(project_id=project_id, message=message))
+
+    @server.tool()
+    def get_snapshot(snapshot_id: str) -> dict:
+        """Get a snapshot by ID.
+
+        Args:
+            snapshot_id: The snapshot ID.
+        """
+        snapshot = engine.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise SnapshotNotFoundError(snapshot_id)
+        return _snapshot(snapshot)
+
+    @server.tool()
+    def list_snapshots(project_id: str) -> list:
+        """List all snapshots for a project.
+
+        Args:
+            project_id: The project ID.
+        """
+        return [_snapshot(snapshot) for snapshot in engine.list_snapshots(project_id)]
 
     return server
 

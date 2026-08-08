@@ -5,6 +5,9 @@ from chronicle.storage.memory_version_repository import MemoryVersionRepository
 from chronicle.storage.observation_repository import ObservationRepository
 from chronicle.storage.project_repository import ProjectRepository
 from chronicle.storage.relationship_repository import RelationshipRepository
+from chronicle.storage.snapshot_member_repository import SnapshotMemberRepository
+from chronicle.storage.snapshot_relationship_repository import SnapshotRelationshipRepository
+from chronicle.storage.snapshot_repository import SnapshotRepository
 
 __all__ = [
     "Repository",
@@ -14,4 +17,7 @@ __all__ = [
     "ObservationRepository",
     "ProjectRepository",
     "RelationshipRepository",
+    "SnapshotMemberRepository",
+    "SnapshotRelationshipRepository",
+    "SnapshotRepository",
 ]

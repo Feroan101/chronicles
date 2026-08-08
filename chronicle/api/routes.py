@@ -16,6 +16,8 @@ from chronicle.api.schemas import (
     RelationshipCreate,
     RelationshipRead,
     SearchHitRead,
+    SnapshotCreate,
+    SnapshotRead,
     VersionCreate,
 )
 from chronicle.core import (
@@ -24,6 +26,7 @@ from chronicle.core import (
     GitContextError,
     MemoryNotFoundError,
     ProjectNotFoundError,
+    SnapshotNotFoundError,
 )
 
 router = APIRouter()
@@ -210,3 +213,28 @@ def get_relationships_for_memory(memory_id: str, engine: Engine) -> list[Relatio
 @router.delete("/relationships/{relationship_id}", status_code=204)
 def remove_relationship(relationship_id: str, engine: Engine) -> None:
     engine.remove_relationship(relationship_id)
+
+
+# ------------------------------------------------------------------
+# Snapshot endpoints
+# ------------------------------------------------------------------
+
+
+@router.post("/projects/{project_id}/snapshots", response_model=SnapshotRead, status_code=201)
+def create_snapshot(project_id: str, payload: SnapshotCreate, engine: Engine) -> SnapshotRead:
+    return SnapshotRead.model_validate(
+        engine.create_snapshot(project_id=project_id, message=payload.message)
+    )
+
+
+@router.get("/projects/{project_id}/snapshots", response_model=list[SnapshotRead])
+def list_snapshots(project_id: str, engine: Engine) -> list[SnapshotRead]:
+    return [SnapshotRead.model_validate(snapshot) for snapshot in engine.list_snapshots(project_id)]
+
+
+@router.get("/snapshots/{snapshot_id}", response_model=SnapshotRead)
+def get_snapshot(snapshot_id: str, engine: Engine) -> SnapshotRead:
+    snapshot = engine.get_snapshot(snapshot_id)
+    if snapshot is None:
+        raise SnapshotNotFoundError(snapshot_id)
+    return SnapshotRead.model_validate(snapshot)

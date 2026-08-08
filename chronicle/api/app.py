@@ -20,6 +20,7 @@ from chronicle.core import (
     RelationshipNotFoundError,
     SearchQueryError,
     SelfRelationshipError,
+    SnapshotNotFoundError,
 )
 
 DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
@@ -29,6 +30,7 @@ _STATUS_CODES: dict[type[ChronicleError], int] = {
     MemoryNotFoundError: 404,
     ObservationNotFoundError: 404,
     RelationshipNotFoundError: 404,
+    SnapshotNotFoundError: 404,
     SearchQueryError: 400,
     GitContextError: 400,
     InvalidObservationActionError: 400,

@@ -45,3 +45,12 @@ class MemoryVersionRepository(Repository):
             .group_by(MemoryVersion.memory_id)
         )
         return {memory_id: sequence for memory_id, sequence in rows}
+
+    def highest_version(self, memory_id: str) -> MemoryVersion | None:
+        """Return the Current Version (highest sequence) for a Memory."""
+        return self._session.scalars(
+            select(MemoryVersion)
+            .where(MemoryVersion.memory_id == memory_id)
+            .order_by(MemoryVersion.sequence.desc())
+            .limit(1)
+        ).one_or_none()

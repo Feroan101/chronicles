@@ -29,6 +29,7 @@ from chronicle.api.schemas import (
     ProjectRead,
     RelationshipRead,
     SearchHitRead,
+    SnapshotRead,
 )
 from chronicle.core import (
     ChronicleEngine,
@@ -44,6 +45,7 @@ from chronicle.core import (
     RelationshipNotFoundError,
     SearchQueryError,
     SelfRelationshipError,
+    SnapshotNotFoundError,
 )
 
 DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
@@ -94,6 +96,10 @@ def _observation(observation) -> ObservationRead:
 
 def _relationship(relationship) -> RelationshipRead:
     return RelationshipRead.model_validate(relationship)
+
+
+def _snapshot(snapshot) -> SnapshotRead:
+    return SnapshotRead.model_validate(snapshot)
 
 
 class Chronicle:
@@ -285,6 +291,28 @@ class Chronicle:
         """Remove a relationship."""
         self._engine.remove_relationship(relationship_id)
 
+    # ------------------------------------------------------------------
+    # Snapshot methods
+    # ------------------------------------------------------------------
+
+    def create_snapshot(self, project_id: str, message: str | None = None) -> SnapshotRead:
+        """Create a snapshot of the project's current knowledge state."""
+        return _snapshot(self._engine.create_snapshot(project_id=project_id, message=message))
+
+    def get_snapshot(self, snapshot_id: str) -> SnapshotRead:
+        """Get a snapshot by ID.
+
+        Raises ``SnapshotNotFoundError`` if no such snapshot exists.
+        """
+        snapshot = self._engine.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise SnapshotNotFoundError(snapshot_id)
+        return _snapshot(snapshot)
+
+    def list_snapshots(self, project_id: str) -> list[SnapshotRead]:
+        """List all snapshots for a project."""
+        return [_snapshot(snapshot) for snapshot in self._engine.list_snapshots(project_id)]
+
 
 __all__ = [
     "Chronicle",
@@ -301,6 +329,7 @@ __all__ = [
     "RelationshipNotFoundError",
     "SearchQueryError",
     "SelfRelationshipError",
+    "SnapshotNotFoundError",
     "EvidenceRead",
     "MemoryRead",
     "MemorySummaryRead",
@@ -309,4 +338,5 @@ __all__ = [
     "ProjectRead",
     "RelationshipRead",
     "SearchHitRead",
+    "SnapshotRead",
 ]

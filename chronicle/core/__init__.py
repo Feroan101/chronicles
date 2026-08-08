@@ -11,6 +11,7 @@ from chronicle.core.errors import (
     RelationshipNotFoundError,
     SearchQueryError,
     SelfRelationshipError,
+    SnapshotNotFoundError,
 )
 from chronicle.core.git import GitContext
 
@@ -29,4 +30,5 @@ __all__ = [
     "SearchQueryError",
     "SearchResult",
     "SelfRelationshipError",
+    "SnapshotNotFoundError",
 ]
