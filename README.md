@@ -2,8 +2,8 @@
 
 # Chronicle
 
-![Status](https://img.shields.io/badge/status-alpha-blue)
-![Python](https://img.shields.io/badge/python-3.12+-blue)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Python](https://img.shields.io/badge/python-3.13+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Local First](https://img.shields.io/badge/local--first-yes-success)
 
@@ -32,9 +32,6 @@ Chronicle tracks **project understanding**.
 </div>
 
 ---
-
-> [!NOTE]
-> Chronicle is currently under active development. The project is focused on delivering a stable, production-quality Version 1.
 
 ## Overview
 
@@ -72,11 +69,11 @@ Although the codebase evolves through version control, the knowledge behind thos
 
 Chronicle versions engineering knowledge in the same way Git versions source code.
 
-As a project evolves, Chronicle observes meaningful changes and proposes knowledge snapshots that capture what was learned, why decisions were made, and how different parts of the system relate to one another.
+As a project evolves, Chronicle allows users and agents to record knowledge with optional Git context (branch, commit, description) that connects code changes to project understanding.
 
 Every connected AI agent works from the same evolving understanding of the project instead of rebuilding context from scratch.
 
-Knowledge becomes searchable, verifiable, branch-aware, and versioned.
+Knowledge becomes searchable, verifiable, and versioned.
 
 ---
 
@@ -96,16 +93,14 @@ Knowledge becomes searchable, verifiable, branch-aware, and versioned.
 
         ┌──────────────────────┴──────────────────────┐
         │                                             │
- Knowledge Graph                             Snapshot Store
- Relationships                               Version History
- Evidence                                    Branches
- Confidence                                  Verification
- Drift Detection                             Search
+   Knowledge Store                            Evidence Tracking
+   Memory Versions                            Git Context
+   FTS5 Search                                 Version History
 ```
 
 Chronicle acts as the shared knowledge layer between AI coding agents and the software project.
 
-It continuously builds an understanding of the project while allowing every connected tool to read from and contribute to the same knowledge base.
+It builds an understanding of the project while allowing every connected tool to read from and contribute to the same knowledge base.
 
 ---
 
@@ -113,13 +108,10 @@ It continuously builds an understanding of the project while allowing every conn
 
 | Feature | Description |
 |----------|-------------|
-| Versioned Knowledge | Engineering knowledge evolves through immutable snapshots. |
-| Knowledge Graph | Connects architecture, constraints, dependencies, and decisions. |
-| Branch-Aware Memory | Project knowledge follows Git branches. |
-| Evidence | Every knowledge object records why it exists. |
-| Confidence | Track the reliability of stored knowledge. |
-| Verification | Validate stored knowledge against the current project. |
-| Drift Detection | Detect when implementation and stored knowledge diverge. |
+| Versioned Knowledge | Engineering knowledge evolves through immutable versions. |
+| Evidence Tracking | Every knowledge object records why it exists. |
+| Git Context | Optional association of knowledge with Git branch, commit, and description. |
+| FTS5 Search | Full-text search across project knowledge. |
 | Local First | Every repository owns its own Chronicle repository. |
 
 Detailed documentation for every feature is available in the documentation sections below.
@@ -136,7 +128,7 @@ project/
 └── .chronicle/
 ```
 
-The `.chronicle` directory stores the project's versioned engineering knowledge, snapshots, metadata, indexes, and configuration.
+The `.chronicle` directory stores the project's versioned engineering knowledge, metadata, indexes, and configuration.
 
 Source code remains owned by Git.
 
@@ -144,21 +136,29 @@ Engineering knowledge is owned by Chronicle.
 
 ## Quick Start
 
-> [!WARNING]
-> The following commands represent the planned V1 CLI and may change during development.
-
 ```bash
+# Initialize Chronicle in your project
 chronicle init
 
-chronicle snapshot
+# Create a project
+chronicle project create "my-project"
 
-chronicle status
+# Store knowledge with optional Git context
+chronicle memory create \
+  --project-id <project-id> \
+  --content "We use FastAPI for the REST layer" \
+  --type decision \
+  --git-branch main \
+  --git-commit abc123
 
-chronicle search "authentication"
+# Search your knowledge
+chronicle search "FastAPI"
 
-chronicle verify
+# View a memory
+chronicle show --memory-id <memory-id>
 
-chronicle history
+# View version history with Git context
+chronicle version show --memory-id <memory-id> --sequence 1
 ```
 
 ## Documentation
@@ -177,15 +177,9 @@ Chronicle's documentation is organized by responsibility.
 
 | Document | Description |
 |----------|-------------|
-| [`ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | High-level system architecture |
+| [`SYSTEM_ARCHITECTURE.md`](docs/architecture/SYSTEM_ARCHITECTURE.md) | High-level system architecture |
 | [`OBJECT_MODEL.md`](docs/architecture/OBJECT_MODEL.md) | Chronicle object model |
-| [`SNAPSHOTS.md`](docs/architecture/SNAPSHOTS.md) | Snapshot and versioning model |
 | [`STORAGE.md`](docs/architecture/STORAGE.md) | Storage architecture |
-| [`GRAPH.md`](docs/architecture/GRAPH.md) | Knowledge graph |
-| [`OBSERVATION.md`](docs/architecture/OBSERVATION.md) | Observation pipeline |
-| [`VERIFICATION.md`](docs/architecture/VERIFICATION.md) | Verification pipeline |
-| [`DRIFT_DETECTION.md`](docs/architecture/DRIFT_DETECTION.md) | Drift detection |
-| [`MERGE.md`](docs/architecture/MERGE.md) | Merge strategy |
 
 ### APIs
 
@@ -204,11 +198,10 @@ Chronicle's documentation is organized by responsibility.
 | [`STORAGE_ENGINE.md`](docs/implementation/STORAGE_ENGINE.md) | Persistence layer |
 | [`GIT_BRIDGE.md`](docs/implementation/GIT_BRIDGE.md) | Git integration |
 | [`DATABASE_SCHEMA.md`](docs/implementation/DATABASE_SCHEMA.md) | Database schema |
-| [`ROADMAP.md`](docs/implementation/ROADMAP.md) | V1 implementation roadmap |
 
 ## Roadmap
 
-Chronicle is currently focused on delivering a stable Version 1.
+Chronicle Version 1 focuses on establishing the core foundation: persistent knowledge, versioning, evidence tracking, and search.
 
 See the full implementation roadmap in [`docs/implementation/ROADMAP.md`](docs/implementation/ROADMAP.md).
 
