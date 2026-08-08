@@ -13,9 +13,17 @@ def create(
     content: str = typer.Option(..., help="Memory content."),
     type: str | None = typer.Option(None, help="Memory type (e.g. fact, decision)."),
     context: str | None = typer.Option(None, help="Where the knowledge applies."),
+    git_branch: str | None = typer.Option(None, help="Git branch name."),
+    git_commit: str | None = typer.Option(None, help="Git commit hash."),
+    git_description: str | None = typer.Option(None, help="Git change description."),
 ) -> None:
+    git_ctx = None
+    if any([git_branch, git_commit, git_description]):
+        from chronicle.core.git import GitContext
+
+        git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
     memory = ctx.engine().create_memory(
-        project_id=project_id, content=content, type=type, context=context
+        project_id=project_id, content=content, type=type, context=context, git_context=git_ctx
     )
     current = memory.versions[-1]
     typer.echo(f"Created memory {memory.id}")

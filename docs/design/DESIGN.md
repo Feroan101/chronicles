@@ -199,6 +199,13 @@ Chronicle remains responsible for engineering knowledge.
 
 Chronicle follows Git's workflow wherever practical, including concepts such as repositories, branches, history, and immutable state.
 
+In Version 1 the Git Integration is manual and explicit: Git context (branch,
+commit, description) is associated with knowledge only when the user or agent
+provides it, and is recorded as Evidence. It does not run Git commands, inspect
+a repository, detect the current branch, or track branches. Branch-aware
+knowledge and repository inspection remain future-version considerations, not
+part of the Version 1 contract (see `spec/GIT_INTEGRATION.md` §11 and §14).
+
 ---
 
 # Public Interfaces
@@ -238,12 +245,15 @@ Chronicle Version 1 is considered successful if it can:
 
 * Persist engineering knowledge across AI sessions.
 * Maintain versioned project understanding.
-* Support branch-aware knowledge.
+* Reference knowledge to Git context (branch, commit, description) explicitly.
 * Explain why knowledge exists.
 * Detect stale or drifting knowledge.
 * Allow multiple AI agents to share the same understanding of a repository.
 * Operate entirely on a local machine.
 * Feel familiar to developers who already understand Git.
+
+Branch-aware knowledge (automatic branch tracking) is a future-version goal and
+is not part of the Version 1 contract (see `spec/GIT_INTEGRATION.md` §14).
 
 ---
 

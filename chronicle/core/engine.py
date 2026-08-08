@@ -10,13 +10,16 @@ from chronicle.core.errors import (
     ProjectNotFoundError,
     SearchQueryError,
 )
-from chronicle.models import Memory, MemoryVersion, Project
+from chronicle.core.git import GitContext
+from chronicle.models import Evidence, Memory, MemoryVersion, Project
 from chronicle.storage import (
+    EvidenceRepository,
     MemoryRepository,
     MemoryVersionRepository,
     ProjectRepository,
 )
 from chronicle.utils.ids import new_uuid
+from chronicle.utils.time import utcnow
 
 _UNSET = object()
 
@@ -64,23 +67,26 @@ class ChronicleEngine:
         content: str,
         type: str | None = None,
         context: str | None = None,
+        git_context: GitContext | None = None,
     ) -> Memory:
         with self._transaction() as session:
             if ProjectRepository(session).get(project_id) is None:
                 raise ProjectNotFoundError(project_id)
             memory = Memory(id=new_uuid(), project_id=project_id, type=type)
             MemoryRepository(session).create(memory)
-            MemoryVersionRepository(session).create(
-                MemoryVersion(
-                    id=new_uuid(),
-                    memory_id=memory.id,
-                    sequence=1,
-                    content=content,
-                    context=context,
-                )
+            version = MemoryVersion(
+                id=new_uuid(),
+                memory_id=memory.id,
+                sequence=1,
+                content=content,
+                context=context,
             )
+            MemoryVersionRepository(session).create(version)
+            self._record_git_context(session, version, git_context)
             session.flush()
-            list(memory.versions)
+            _ = memory.versions
+            for v in memory.versions:
+                _ = v.evidence
             return memory
 
     def get_memory(self, memory_id: str) -> Memory | None:
@@ -101,24 +107,67 @@ class ChronicleEngine:
         memory_id: str,
         content: str,
         context: str | None = None,
+        git_context: GitContext | None = None,
     ) -> MemoryVersion:
         with self._transaction() as session:
             if MemoryRepository(session).get(memory_id) is None:
                 raise MemoryNotFoundError(memory_id)
             next_sequence = MemoryVersionRepository(session).highest_sequence(memory_id) + 1
-            return MemoryVersionRepository(session).create(
-                MemoryVersion(
-                    id=new_uuid(),
-                    memory_id=memory_id,
-                    sequence=next_sequence,
-                    content=content,
-                    context=context,
-                )
+            version = MemoryVersion(
+                id=new_uuid(),
+                memory_id=memory_id,
+                sequence=next_sequence,
+                content=content,
+                context=context,
             )
+            MemoryVersionRepository(session).create(version)
+            self._record_git_context(session, version, git_context)
+            session.flush()
+            _ = version.evidence
+            return version
 
     def list_memories(self, project_id: str) -> list[Memory]:
         with self._transaction() as session:
             return MemoryRepository(session).list_by_project(project_id)
+
+    def get_version(self, memory_id: str, sequence: int) -> MemoryVersion | None:
+        with self._transaction() as session:
+            if MemoryRepository(session).get(memory_id) is None:
+                raise MemoryNotFoundError(memory_id)
+            return MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+
+    def get_evidence(self, memory_id: str, sequence: int) -> list[Evidence]:
+        with self._transaction() as session:
+            if MemoryRepository(session).get(memory_id) is None:
+                raise MemoryNotFoundError(memory_id)
+            version = MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+            if version is None:
+                return []
+            return list(version.evidence)
+
+    @staticmethod
+    def _record_git_context(
+        session: Session, version: MemoryVersion, git_context: GitContext | None
+    ) -> None:
+        if git_context is None:
+            return
+        repo = EvidenceRepository(session)
+        fields = {
+            "branch": git_context.branch,
+            "commit": git_context.commit,
+            "description": git_context.description,
+        }
+        for evidence_type, ref in fields.items():
+            if ref is not None:
+                repo.create(
+                    Evidence(
+                        id=new_uuid(),
+                        memory_version_id=version.id,
+                        evidence_type=evidence_type,
+                        ref=ref,
+                        recorded_at=utcnow(),
+                    )
+                )
 
     def search(self, query: str, project_id: str | None = None) -> list[SearchResult]:
         """Search Memories by keyword content.

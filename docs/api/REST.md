@@ -85,7 +85,32 @@ Examples:
 
 ---
 
-## 5. Request Flow
+## 5. Git Context
+
+The REST interface exposes the same Git Integration behavior as the CLI, MCP,
+and SDK interfaces, per the Git Integration Specification.
+
+Requests that create a Memory Version — creating a Memory and creating a
+Version — MAY carry an optional Git context reference with three fields:
+`branch`, `commit`, and `description` (at least one required). The Git context
+is recorded as Evidence on the exact Version created by the request, in the
+same transaction.
+
+Values are opaque strings; only non-empty (non-whitespace) values are accepted,
+with no format validation. An invalid Git context fails the request without
+creating anything and is reported as a `GitContextError`.
+
+Responses reflect the recorded context in two forms:
+
+* A grouped `git_context` representation on Version responses.
+* A raw Evidence representation exposing the individual Evidence rows for a
+  Version.
+
+Updating a Memory attribute does not accept a Git context.
+
+---
+
+## 6. Request Flow
 
 A typical REST interaction follows:
 
@@ -111,7 +136,7 @@ The interface provides access to Chronicle without exposing internal architectur
 
 ---
 
-## 6. Agent and Application Access
+## 7. Agent and Application Access
 
 The REST interface allows different types of clients to interact with Chronicle.
 
@@ -125,7 +150,7 @@ All clients interact through the same Chronicle knowledge model.
 
 ---
 
-## 7. Design Principles
+## 8. Design Principles
 
 ### Clear Interface
 
@@ -151,7 +176,7 @@ Applications should be able to use Chronicle through a standard interface.
 
 ---
 
-## 8. Scope Boundaries
+## 9. Scope Boundaries
 
 This document defines the REST interface concept.
 

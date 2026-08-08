@@ -69,6 +69,7 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "update_memory",
             "create_version",
             "search",
+            "get_evidence",
         }
 
 

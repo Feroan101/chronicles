@@ -48,6 +48,7 @@ def test_application_startup_serves_docs_and_schema(client):
         "/memories/{memory_id}",
         "/projects/{project_id}/memories",
         "/memories/{memory_id}/versions",
+        "/memories/{memory_id}/versions/{sequence}/evidence",
         "/search",
     }
 

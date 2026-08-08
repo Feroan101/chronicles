@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 
 from chronicle.api.deps import Engine
 from chronicle.api.schemas import (
+    EvidenceRead,
     MemoryCreate,
     MemoryRead,
     MemorySummaryRead,
@@ -14,6 +15,8 @@ from chronicle.api.schemas import (
 )
 from chronicle.core import (
     ChronicleEngine,
+    GitContext,
+    GitContextError,
     MemoryNotFoundError,
     ProjectNotFoundError,
 )
@@ -26,6 +29,19 @@ def _memory_read(engine: ChronicleEngine, memory_id: str) -> MemoryRead:
     if memory is None:
         raise MemoryNotFoundError(memory_id)
     return MemoryRead.model_validate(memory)
+
+
+def _build_git_context(payload_git_context) -> GitContext | None:
+    if payload_git_context is None:
+        return None
+    try:
+        return GitContext(
+            branch=payload_git_context.branch,
+            commit=payload_git_context.commit,
+            description=payload_git_context.description,
+        )
+    except GitContextError as exc:
+        raise GitContextError(str(exc)) from exc
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=201)
@@ -51,6 +67,7 @@ def create_memory(payload: MemoryCreate, engine: Engine) -> MemoryRead:
             content=payload.content,
             type=payload.type,
             context=payload.context,
+            git_context=_build_git_context(payload.git_context),
         )
     )
 
@@ -78,8 +95,19 @@ def update_memory(memory_id: str, payload: MemoryUpdate, engine: Engine) -> Memo
 @router.post("/memories/{memory_id}/versions", response_model=MemoryVersionRead, status_code=201)
 def create_version(memory_id: str, payload: VersionCreate, engine: Engine) -> MemoryVersionRead:
     return MemoryVersionRead.model_validate(
-        engine.create_version(memory_id=memory_id, content=payload.content, context=payload.context)
+        engine.create_version(
+            memory_id=memory_id,
+            content=payload.content,
+            context=payload.context,
+            git_context=_build_git_context(payload.git_context),
+        )
     )
+
+
+@router.get("/memories/{memory_id}/versions/{sequence}/evidence", response_model=list[EvidenceRead])
+def get_evidence(memory_id: str, sequence: int, engine: Engine) -> list[EvidenceRead]:
+    evidence = engine.get_evidence(memory_id=memory_id, sequence=sequence)
+    return [EvidenceRead.model_validate(e) for e in evidence]
 
 
 @router.get("/search", response_model=list[SearchHitRead])

@@ -226,9 +226,13 @@ Stores Evidence records attached to Memory Versions.
 |-------------------|-----------|----------------------------|---------------------------------------|
 | id                | TEXT      | PRIMARY KEY                | Evidence identity (UUID).             |
 | memory_version_id | TEXT      | NOT NULL, FK memory_versions | Version this evidence supports.     |
-| evidence_type     | TEXT      | NOT NULL                   | commit, pull_request, documentation, source_code, human_confirmation, ai_observation. |
+| evidence_type     | TEXT      | NOT NULL                   | commit, branch, description, pull_request, documentation, source_code, human_confirmation, ai_observation. |
 | ref               | TEXT      | NOT NULL                   | Reference to the evidence (commit SHA, file path, etc.). |
 | recorded_at       | TIMESTAMP | NOT NULL                   | When the evidence was recorded (UTC). |
+
+The `branch` and `description` values record the fields of a Git context
+reference (see the Git Integration Specification). The column is unconstrained
+`TEXT`; the values above are the documented set.
 
 Constraints:
 

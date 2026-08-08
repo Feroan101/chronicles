@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
     MemoryVersionRead,
@@ -13,6 +14,7 @@ from chronicle.api.schemas import (
 )
 from chronicle.core import (
     ChronicleEngine,
+    GitContext,
     MemoryNotFoundError,
     ProjectNotFoundError,
 )
@@ -93,6 +95,9 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         content: str,
         type: str | None = None,
         context: str | None = None,
+        git_branch: str | None = None,
+        git_commit: str | None = None,
+        git_description: str | None = None,
     ) -> dict:
         """Store a new memory in a project.
 
@@ -103,13 +108,20 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             content: The knowledge to store.
             type: An optional memory type, e.g. "decision".
             context: Optional context about when this knowledge applies.
+            git_branch: Optional Git branch name.
+            git_commit: Optional Git commit hash.
+            git_description: Optional description of the Git change.
         """
+        git_ctx = None
+        if any([git_branch, git_commit, git_description]):
+            git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
         return _memory(
             engine.create_memory(
                 project_id=project_id,
                 content=content,
                 type=type,
                 context=context,
+                git_context=git_ctx,
             )
         )
 
@@ -152,21 +164,46 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         return _memory(engine.update_memory(memory_id=memory_id, type=type))
 
     @server.tool()
-    def create_version(memory_id: str, content: str, context: str | None = None) -> dict:
+    def create_version(
+        memory_id: str,
+        content: str,
+        context: str | None = None,
+        git_branch: str | None = None,
+        git_commit: str | None = None,
+        git_description: str | None = None,
+    ) -> dict:
         """Append a new version of a memory.
 
         Args:
             memory_id: The memory ID to extend.
             content: The updated knowledge.
             context: Optional context about when this knowledge applies.
+            git_branch: Optional Git branch name.
+            git_commit: Optional Git commit hash.
+            git_description: Optional description of the Git change.
         """
+        git_ctx = None
+        if any([git_branch, git_commit, git_description]):
+            git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
         return _version(
             engine.create_version(
                 memory_id=memory_id,
                 content=content,
                 context=context,
+                git_context=git_ctx,
             )
         )
+
+    @server.tool()
+    def get_evidence(memory_id: str, sequence: int) -> list:
+        """Get evidence attached to a specific version.
+
+        Args:
+            memory_id: The memory ID.
+            sequence: The version sequence number.
+        """
+        evidence = engine.get_evidence(memory_id=memory_id, sequence=sequence)
+        return [EvidenceRead.model_validate(e).model_dump(mode="json") for e in evidence]
 
     @server.tool()
     def search(query: str, project_id: str | None = None) -> list:
