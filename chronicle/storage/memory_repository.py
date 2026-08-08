@@ -27,7 +27,7 @@ def _fts_query(query: str) -> str:
 class MemoryRepository(Repository):
     def __init__(self, session: Session) -> None:
         super().__init__(session)
-        self._load = selectinload(Memory.versions)
+        self._load = selectinload(Memory.versions).selectinload(MemoryVersion.evidence)
 
     def create(self, memory: Memory) -> Memory:
         self._session.add(memory)

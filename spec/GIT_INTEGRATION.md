@@ -61,7 +61,9 @@ A Git context reference includes:
 
 The reference is provided by the user or agent when creating or updating knowledge.
 
-A reference records where the knowledge came from. It never changes Memory ownership or content.
+A Git context reference is attached to the Version created by the operation that carries it. It never changes Memory ownership or content.
+
+The concrete shape and placement of Git context in Version 1 are defined by the Version 1 Contract (see §14).
 
 ---
 
@@ -123,6 +125,18 @@ A Git context reference MAY be recorded as Evidence for a Memory Version.
 
 When recorded as Evidence, the reference follows the Evidence model.
 
+Each field of the Git context is recorded as its own Evidence row on the target Version:
+
+* `commit` → `evidence_type="commit"`, `ref` is the commit identifier.
+* `branch` → `evidence_type="branch"`, `ref` is the branch name.
+* `description` → `evidence_type="description"`, `ref` is the change description.
+
+Only the fields supplied by the user or agent are recorded. Evidence rows are
+immutable and remain attached to the Version they were recorded for.
+
+When read back, the Evidence rows are presented both as a grouped Git context
+reference (branch, commit, description) and as individual Evidence rows.
+
 Recording Git context as Evidence never makes the knowledge depend on Git.
 
 ---
@@ -140,7 +154,95 @@ Changing interfaces MUST NOT change Git Integration semantics.
 
 ---
 
-# 11. Invariants
+# 11. Version 1 Contract
+
+This section is the authoritative contract for the Git Integration as
+implemented in Version 1. Behavior is defined only where this section or the
+sections above require it; the specification does not invent behavior that is
+not described.
+
+## 11.1 Git Context Shape
+
+A Git context is a reference with three optional fields:
+
+* `branch` — the branch name, where available.
+* `commit` — the commit identifier, where available.
+* `description` — a description of the associated change, where available.
+
+At least one field MAY be supplied; the fields that are not supplied are
+omitted. A Git context with no fields supplied is not a valid reference and is
+rejected.
+
+## 11.2 Operations
+
+The `git_context` reference is accepted by the knowledge operations that create
+a Memory Version:
+
+* `create_memory` — records the Git context against the Memory's initial
+  Version (sequence 1).
+* `create_version` — records the Git context against the appended Version.
+
+The Git context is attached to the exact Version created by the operation. It is
+recorded in the same transaction as the Version; an invalid Git context fails
+the whole operation, so no Version is created and no partial modification
+occurs.
+
+`update_memory` does not accept a Git context: it changes a Memory attribute and
+creates no Version to attach Evidence to.
+
+## 11.3 One Context per Operation
+
+An operation accepts at most one Git context. A single Version therefore
+carries at most one grouped Git context reference.
+
+## 11.4 Validation
+
+Git context field values are opaque strings. Version 1 applies only
+presence/non-empty validation:
+
+* A field value MUST be a non-empty string.
+* A field value consisting only of whitespace is treated as empty and is
+  rejected.
+* No format validation is applied: branch names and commit identifiers are not
+  checked against Git naming or hash rules.
+
+An invalid Git context raises a `GitContextError` (a `ChronicleError`) and
+fails the operation without side effects.
+
+## 11.5 Evidence Mapping
+
+Each supplied field is recorded as its own Evidence row on the target Version,
+as defined in §9:
+
+* `branch` → `evidence_type="branch"`, `ref` = branch name.
+* `commit` → `evidence_type="commit"`, `ref` = commit identifier.
+* `description` → `evidence_type="description"`, `ref` = change description.
+
+Only the fields supplied by the caller are recorded. Evidence rows are
+immutable and never move between Versions.
+
+## 11.6 Read Representation
+
+Recorded Git context is readable through every interface:
+
+* A grouped read representation exposes the Git context of a Version as
+  `branch`, `commit`, and `description` fields, assembled from that Version's
+  Evidence rows.
+* A raw Evidence read exposes the individual Evidence rows attached to a
+  Version, including their `evidence_type` and `ref` values.
+
+Both representations reflect the same stored data.
+
+## 11.7 Interface Parity
+
+The Git Integration behavior is identical through the CLI, REST, MCP, and SDK
+interfaces, per §10. All four interfaces accept the same Git context shape,
+apply the same validation, record the same Evidence, and expose the same
+grouped and raw read representations.
+
+---
+
+# 12. Invariants
 
 The following conditions MUST always remain true.
 
@@ -154,7 +256,7 @@ The following conditions MUST always remain true.
 
 ---
 
-# 12. Compliance
+# 13. Compliance
 
 A Chronicle implementation is compliant with this specification if it:
 
@@ -166,7 +268,7 @@ A Chronicle implementation is compliant with this specification if it:
 
 ---
 
-# 13. Out of Scope
+# 14. Out of Scope
 
 This specification does not define:
 
@@ -179,3 +281,14 @@ This specification does not define:
 * Version control implementation.
 
 These concerns are implementation-specific or belong to future versions.
+
+In Version 1 the Git Integration additionally does NOT include:
+
+* Execution of Git subprocesses or Git commands.
+* Inspection of a Git repository, its branches, or its working tree.
+* Automatic detection of the current branch or commit.
+* Branch tracking, branch-aware knowledge, or the `branches` model.
+* Snapshot integration.
+* Automatic knowledge operations in response to Git events.
+
+None of these behaviors may be added without an approved specification change.

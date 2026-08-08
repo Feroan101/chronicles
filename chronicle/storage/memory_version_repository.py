@@ -1,4 +1,5 @@
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from chronicle.models import MemoryVersion
 from chronicle.storage.base import Repository
@@ -11,6 +12,13 @@ class MemoryVersionRepository(Repository):
 
     def get(self, version_id: str) -> MemoryVersion | None:
         return self._session.get(MemoryVersion, version_id)
+
+    def get_by_sequence(self, memory_id: str, sequence: int) -> MemoryVersion | None:
+        return self._session.scalars(
+            select(MemoryVersion)
+            .where(MemoryVersion.memory_id == memory_id, MemoryVersion.sequence == sequence)
+            .options(selectinload(MemoryVersion.evidence))
+        ).one_or_none()
 
     def list_by_memory(self, memory_id: str) -> list[MemoryVersion]:
         return list(

@@ -21,3 +21,12 @@ class SearchQueryError(ChronicleError):
         else:
             super().__init__(f"Invalid search query: {query}")
         self.query = query
+
+
+class GitContextError(ChronicleError):
+    def __init__(self, field: str | None = None) -> None:
+        if field is not None:
+            super().__init__(f"Invalid Git context: {field} must not be empty")
+        else:
+            super().__init__("Invalid Git context: at least one field must be provided")
+        self.field = field

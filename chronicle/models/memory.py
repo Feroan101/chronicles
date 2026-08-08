@@ -67,3 +67,17 @@ class MemoryVersion(Base):
     confidence_scores: Mapped[list[ConfidenceScore]] = relationship(
         back_populates="memory_version", cascade="all, delete-orphan"
     )
+
+    @property
+    def git_context(self) -> dict[str, str] | None:
+        try:
+            evidence_list = self.evidence
+        except Exception:
+            return None
+        if not evidence_list:
+            return None
+        ctx: dict[str, str] = {}
+        for ev in evidence_list:
+            if ev.evidence_type in ("branch", "commit", "description"):
+                ctx[ev.evidence_type] = ev.ref
+        return ctx if ctx else None

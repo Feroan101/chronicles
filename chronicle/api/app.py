@@ -10,6 +10,7 @@ from chronicle.api.routes import router
 from chronicle.core import (
     ChronicleEngine,
     ChronicleError,
+    GitContextError,
     MemoryNotFoundError,
     ProjectNotFoundError,
     SearchQueryError,
@@ -21,6 +22,7 @@ _STATUS_CODES: dict[type[ChronicleError], int] = {
     ProjectNotFoundError: 404,
     MemoryNotFoundError: 404,
     SearchQueryError: 400,
+    GitContextError: 400,
 }
 
 

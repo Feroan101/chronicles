@@ -173,16 +173,40 @@ The method set mirrors the Core, REST, and MCP operations:
 | --- | --- |
 | `create_project(name, description=None)` | Create a project, returning `ProjectRead`. |
 | `get_project(project_id)` | Get a project by ID. Raises `ProjectNotFoundError` when missing. |
-| `create_memory(project_id, content, type=None, context=None)` | Store a memory with its initial version, returning `MemoryRead`. |
+| `create_memory(project_id, content, type=None, context=None, git_context=None)` | Store a memory with its initial version, returning `MemoryRead`. `git_context` optionally records a Git context on the initial version. |
 | `get_memory(memory_id)` | Get a memory and its version history. Raises `MemoryNotFoundError` when missing. |
 | `list_memories(project_id)` | List a project's memories, ordered by creation, returning `list[MemoryRead]`. |
-| `update_memory(memory_id, type=UNSET)` | Update a memory's type, returning `MemoryRead`. |
-| `create_version(memory_id, content, context=None)` | Append a memory version, returning `MemoryVersionRead`. |
+| `update_memory(memory_id, type=UNSET)` | Update a memory's type, returning `MemoryRead`. Does not accept a Git context. |
+| `create_version(memory_id, content, context=None, git_context=None)` | Append a memory version, returning `MemoryVersionRead`. `git_context` optionally records a Git context on the appended version. |
+| `get_evidence(memory_id, sequence)` | Get the raw Evidence rows recorded against a specific version, returning `list[EvidenceRead]`. |
 | `search(query, project_id=None)` | Search project knowledge, returning `list[SearchHitRead]` of current versions. |
 
 Methods return the shared Pydantic read models (`ProjectRead`, `MemoryRead`,
-`MemoryVersionRead`, `SearchHitRead`) also used by the REST and MCP interfaces;
-SQLAlchemy ORM objects are never exposed.
+`MemoryVersionRead`, `SearchHitRead`, `EvidenceRead`) also used by the REST and
+MCP interfaces; SQLAlchemy ORM objects are never exposed.
+
+### Git context
+
+The `git_context` argument is a reference with three optional fields —
+`branch`, `commit`, and `description`. At least one field must be provided. The
+Git context is recorded as Evidence on the exact version created by the
+operation, and is read back as a grouped `git_context` (`branch`, `commit`,
+`description`) on `MemoryVersionRead`.
+
+Values are opaque strings; only non-empty (non-whitespace) values are accepted.
+No format validation is applied. An invalid Git context raises
+`GitContextError` and fails the operation without creating any version.
+
+Each field is stored as its own Evidence row:
+
+| Field | `evidence_type` | `ref` |
+| --- | --- | --- |
+| `branch` | `branch` | branch name |
+| `commit` | `commit` | commit identifier |
+| `description` | `description` | change description |
+
+`get_evidence` returns the raw Evidence rows for a version, while version reads
+carry the grouped Git context.
 
 ### update_memory semantics
 
@@ -196,8 +220,8 @@ not provided" from an explicit null:
 ### Errors
 
 SDK methods surface the Core domain errors directly: `ProjectNotFoundError`,
-`MemoryNotFoundError`, and `SearchQueryError` (all subclasses of
-`ChronicleError`). The SDK adds no error layer of its own.
+`MemoryNotFoundError`, `SearchQueryError`, and `GitContextError` (all
+subclasses of `ChronicleError`). The SDK adds no error layer of its own.
 
 ---
 

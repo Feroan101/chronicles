@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
     MemoryVersionRead,
@@ -30,6 +31,8 @@ from chronicle.api.schemas import (
 from chronicle.core import (
     ChronicleEngine,
     ChronicleError,
+    GitContext,
+    GitContextError,
     MemoryNotFoundError,
     ProjectNotFoundError,
     SearchQueryError,
@@ -124,14 +127,21 @@ class Chronicle:
         content: str,
         type: str | None = None,
         context: str | None = None,
+        git_branch: str | None = None,
+        git_commit: str | None = None,
+        git_description: str | None = None,
     ) -> MemoryRead:
         """Store a new memory in a project, with its first version."""
+        git_ctx = None
+        if any([git_branch, git_commit, git_description]):
+            git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
         return _memory(
             self._engine.create_memory(
                 project_id=project_id,
                 content=content,
                 type=type,
                 context=context,
+                git_context=git_ctx,
             )
         )
 
@@ -166,15 +176,27 @@ class Chronicle:
         memory_id: str,
         content: str,
         context: str | None = None,
+        git_branch: str | None = None,
+        git_commit: str | None = None,
+        git_description: str | None = None,
     ) -> MemoryVersionRead:
         """Append a new version of a memory."""
+        git_ctx = None
+        if any([git_branch, git_commit, git_description]):
+            git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
         return _version(
             self._engine.create_version(
                 memory_id=memory_id,
                 content=content,
                 context=context,
+                git_context=git_ctx,
             )
         )
+
+    def get_evidence(self, memory_id: str, sequence: int) -> list[EvidenceRead]:
+        """Get evidence attached to a specific version."""
+        evidence = self._engine.get_evidence(memory_id=memory_id, sequence=sequence)
+        return [EvidenceRead.model_validate(e) for e in evidence]
 
     def search(self, query: str, project_id: str | None = None) -> list[SearchHitRead]:
         """Search project knowledge, returning the current version of matches."""
@@ -188,9 +210,12 @@ __all__ = [
     "Chronicle",
     "UNSET",
     "ChronicleError",
+    "GitContext",
+    "GitContextError",
     "MemoryNotFoundError",
     "ProjectNotFoundError",
     "SearchQueryError",
+    "EvidenceRead",
     "MemoryRead",
     "MemorySummaryRead",
     "MemoryVersionRead",
