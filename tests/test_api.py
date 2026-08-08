@@ -50,6 +50,11 @@ def test_application_startup_serves_docs_and_schema(client):
         "/memories/{memory_id}/versions",
         "/memories/{memory_id}/versions/{sequence}/evidence",
         "/search",
+        "/projects/{project_id}/observations",
+        "/observations/{observation_id}/process",
+        "/projects/{project_id}/relationships",
+        "/memories/{memory_id}/relationships",
+        "/relationships/{relationship_id}",
     }
 
 
@@ -242,3 +247,244 @@ def test_error_responses_are_fastapi_native(client):
     response = client.get("/search", params={"query": ""})
     assert response.status_code == 400
     assert set(response.json()) == {"detail"}
+
+
+# ------------------------------------------------------------------
+# Observation API tests
+# ------------------------------------------------------------------
+
+
+def test_create_observation(client, project_id):
+    response = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "something observed"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["project_id"] == project_id
+    assert body["content"] == "something observed"
+    assert body["status"] == "pending"
+    assert body["processed_at"] is None
+
+
+def test_create_observation_unknown_project_returns_404(client):
+    response = client.post(
+        "/projects/missing/observations",
+        json={"content": "x"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found: missing"}
+
+
+def test_list_observations(client, project_id):
+    first = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "a"},
+    ).json()["id"]
+    second = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "b"},
+    ).json()["id"]
+
+    response = client.get(f"/projects/{project_id}/observations")
+    assert response.status_code == 200
+    assert [o["id"] for o in response.json()] == [first, second]
+
+
+def test_process_observation_create_memory(client, project_id):
+    obs = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "new knowledge"},
+    ).json()
+
+    response = client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "create_memory"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "processed"
+
+    memories = client.get(f"/projects/{project_id}/memories").json()
+    assert len(memories) == 1
+    assert memories[0]["versions"][0]["content"] == "new knowledge"
+
+
+def test_process_observation_update_memory(client, project_id):
+    mem = _create_memory(client, project_id, "original").json()
+    obs = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "updated"},
+    ).json()
+
+    response = client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "update_memory", "memory_id": mem["id"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "processed"
+
+    fetched = client.get(f"/memories/{mem['id']}").json()
+    assert len(fetched["versions"]) == 2
+    assert fetched["versions"][1]["content"] == "updated"
+
+
+def test_process_observation_discard(client, project_id):
+    obs = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "not useful"},
+    ).json()
+
+    response = client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "discard"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "discarded"
+
+
+def test_process_observation_already_processed_returns_400(client, project_id):
+    obs = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "x"},
+    ).json()
+    client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "discard"},
+    )
+
+    response = client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "discard"},
+    )
+    assert response.status_code == 400
+    assert "already" in response.json()["detail"]
+
+
+def test_process_observation_unknown_observation_returns_404(client):
+    response = client.post(
+        "/observations/missing/process",
+        json={"action": "discard"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Observation not found: missing"}
+
+
+def test_process_observation_invalid_action_returns_400(client, project_id):
+    obs = client.post(
+        f"/projects/{project_id}/observations",
+        json={"content": "x"},
+    ).json()
+
+    response = client.post(
+        f"/observations/{obs['id']}/process",
+        json={"action": "invalid_action"},
+    )
+    assert response.status_code == 400
+    assert "Invalid observation action" in response.json()["detail"]
+
+
+# ------------------------------------------------------------------
+# Relationship API tests
+# ------------------------------------------------------------------
+
+
+def test_create_relationship(client, project_id):
+    mem_a = _create_memory(client, project_id, "a").json()
+    mem_b = _create_memory(client, project_id, "b").json()
+
+    response = client.post(
+        f"/projects/{project_id}/relationships",
+        json={
+            "from_memory_id": mem_a["id"],
+            "to_memory_id": mem_b["id"],
+            "type": "caused_by",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["project_id"] == project_id
+    assert body["from_memory_id"] == mem_a["id"]
+    assert body["to_memory_id"] == mem_b["id"]
+    assert body["type"] == "caused_by"
+
+
+def test_create_relationship_self_returns_400(client, project_id):
+    mem = _create_memory(client, project_id, "a").json()
+
+    response = client.post(
+        f"/projects/{project_id}/relationships",
+        json={
+            "from_memory_id": mem["id"],
+            "to_memory_id": mem["id"],
+            "type": "related_to",
+        },
+    )
+    assert response.status_code == 400
+    assert "cannot connect a Memory to itself" in response.json()["detail"]
+
+
+def test_list_relationships(client, project_id):
+    mem_a = _create_memory(client, project_id, "a").json()
+    mem_b = _create_memory(client, project_id, "b").json()
+    first = client.post(
+        f"/projects/{project_id}/relationships",
+        json={"from_memory_id": mem_a["id"], "to_memory_id": mem_b["id"], "type": "caused_by"},
+    ).json()["id"]
+    mem_c = _create_memory(client, project_id, "c").json()
+    second = client.post(
+        f"/projects/{project_id}/relationships",
+        json={"from_memory_id": mem_b["id"], "to_memory_id": mem_c["id"], "type": "resolved_by"},
+    ).json()["id"]
+
+    response = client.get(f"/projects/{project_id}/relationships")
+    assert response.status_code == 200
+    assert [r["id"] for r in response.json()] == [first, second]
+
+
+def test_get_relationships_for_memory(client, project_id):
+    mem_a = _create_memory(client, project_id, "a").json()
+    mem_b = _create_memory(client, project_id, "b").json()
+    mem_c = _create_memory(client, project_id, "c").json()
+    rel_ab = client.post(
+        f"/projects/{project_id}/relationships",
+        json={"from_memory_id": mem_a["id"], "to_memory_id": mem_b["id"], "type": "caused_by"},
+    ).json()
+    rel_bc = client.post(
+        f"/projects/{project_id}/relationships",
+        json={"from_memory_id": mem_b["id"], "to_memory_id": mem_c["id"], "type": "resolved_by"},
+    ).json()
+
+    response = client.get(f"/memories/{mem_b['id']}/relationships")
+    assert response.status_code == 200
+    rel_ids = {r["id"] for r in response.json()}
+    assert rel_ab["id"] in rel_ids
+    assert rel_bc["id"] in rel_ids
+
+
+def test_get_relationships_for_memory_empty(client, project_id):
+    mem = _create_memory(client, project_id, "isolated").json()
+
+    response = client.get(f"/memories/{mem['id']}/relationships")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_remove_relationship(client, project_id):
+    mem_a = _create_memory(client, project_id, "a").json()
+    mem_b = _create_memory(client, project_id, "b").json()
+    rel = client.post(
+        f"/projects/{project_id}/relationships",
+        json={"from_memory_id": mem_a["id"], "to_memory_id": mem_b["id"], "type": "related_to"},
+    ).json()
+
+    response = client.delete(f"/relationships/{rel['id']}")
+    assert response.status_code == 204
+
+    verify = client.get(f"/projects/{project_id}/relationships")
+    assert verify.json() == []
+
+
+def test_remove_relationship_unknown_returns_404(client):
+    response = client.delete("/relationships/missing")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Relationship not found: missing"}

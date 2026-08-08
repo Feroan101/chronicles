@@ -9,7 +9,9 @@ from chronicle.api.schemas import (
     MemoryRead,
     MemorySummaryRead,
     MemoryVersionRead,
+    ObservationRead,
     ProjectRead,
+    RelationshipRead,
     SearchHitRead,
 )
 from chronicle.core import (
@@ -45,6 +47,14 @@ def _search_hit(result) -> dict:
         version=MemoryVersionRead.model_validate(result.version),
         rank=result.rank,
     ).model_dump(mode="json")
+
+
+def _observation(observation) -> dict:
+    return ObservationRead.model_validate(observation).model_dump(mode="json")
+
+
+def _relationship(relationship) -> dict:
+    return RelationshipRead.model_validate(relationship).model_dump(mode="json")
 
 
 def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> FastMCP:
@@ -217,6 +227,104 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             project_id: Restrict results to a project, or null to search all.
         """
         return [_search_hit(result) for result in engine.search(query=query, project_id=project_id)]
+
+    # ------------------------------------------------------------------
+    # Observation tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def create_observation(project_id: str, content: str) -> dict:
+        """Create a pending observation in a project.
+
+        Args:
+            project_id: The project ID.
+            content: The observed information.
+        """
+        return _observation(engine.create_observation(project_id=project_id, content=content))
+
+    @server.tool()
+    def list_observations(project_id: str) -> list:
+        """List all observations in a project, ordered by creation.
+
+        Args:
+            project_id: The project ID.
+        """
+        return [_observation(obs) for obs in engine.list_observations(project_id)]
+
+    @server.tool()
+    def process_observation(observation_id: str, action: str, memory_id: str | None = None) -> dict:
+        """Process an observation into knowledge or discard it.
+
+        Actions:
+        - "create_memory": creates a new memory from the observation content.
+        - "update_memory": appends a new version to an existing memory
+          (memory_id is required).
+        - "discard": marks the observation as discarded with no knowledge change.
+
+        Args:
+            observation_id: The observation ID.
+            action: The processing action.
+            memory_id: Required for "update_memory" action.
+        """
+        return _observation(
+            engine.process_observation(
+                observation_id=observation_id,
+                action=action,
+                memory_id=memory_id,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Relationship tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def create_relationship(
+        project_id: str, from_memory_id: str, to_memory_id: str, type: str
+    ) -> dict:
+        """Create a directed relationship between two memories.
+
+        Args:
+            project_id: The project ID.
+            from_memory_id: The source memory ID.
+            to_memory_id: The target memory ID.
+            type: The relationship type (e.g. "caused_by", "resolved_by").
+        """
+        return _relationship(
+            engine.create_relationship(
+                project_id=project_id,
+                from_memory_id=from_memory_id,
+                to_memory_id=to_memory_id,
+                type=type,
+            )
+        )
+
+    @server.tool()
+    def list_relationships(project_id: str) -> list:
+        """List all relationships in a project, ordered by creation.
+
+        Args:
+            project_id: The project ID.
+        """
+        return [_relationship(rel) for rel in engine.list_relationships(project_id)]
+
+    @server.tool()
+    def get_relationships_for_memory(memory_id: str) -> list:
+        """Get all relationships where a memory is source or target.
+
+        Args:
+            memory_id: The memory ID.
+        """
+        return [_relationship(rel) for rel in engine.get_relationships_for_memory(memory_id)]
+
+    @server.tool()
+    def remove_relationship(relationship_id: str) -> None:
+        """Remove a relationship.
+
+        Args:
+            relationship_id: The relationship ID.
+        """
+        engine.remove_relationship(relationship_id)
 
     return server
 

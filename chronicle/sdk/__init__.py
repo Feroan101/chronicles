@@ -25,17 +25,25 @@ from chronicle.api.schemas import (
     MemoryRead,
     MemorySummaryRead,
     MemoryVersionRead,
+    ObservationRead,
     ProjectRead,
+    RelationshipRead,
     SearchHitRead,
 )
 from chronicle.core import (
     ChronicleEngine,
     ChronicleError,
+    CrossProjectRelationshipError,
     GitContext,
     GitContextError,
+    InvalidObservationActionError,
     MemoryNotFoundError,
+    ObservationAlreadyProcessedError,
+    ObservationNotFoundError,
     ProjectNotFoundError,
+    RelationshipNotFoundError,
     SearchQueryError,
+    SelfRelationshipError,
 )
 
 DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
@@ -78,6 +86,14 @@ def _search_hit(result) -> SearchHitRead:
         version=MemoryVersionRead.model_validate(result.version),
         rank=result.rank,
     )
+
+
+def _observation(observation) -> ObservationRead:
+    return ObservationRead.model_validate(observation)
+
+
+def _relationship(relationship) -> RelationshipRead:
+    return RelationshipRead.model_validate(relationship)
 
 
 class Chronicle:
@@ -205,20 +221,92 @@ class Chronicle:
             for result in self._engine.search(query=query, project_id=project_id)
         ]
 
+    # ------------------------------------------------------------------
+    # Observation methods
+    # ------------------------------------------------------------------
+
+    def create_observation(self, project_id: str, content: str) -> ObservationRead:
+        """Create a pending observation in a project."""
+        return _observation(self._engine.create_observation(project_id=project_id, content=content))
+
+    def list_observations(self, project_id: str) -> list[ObservationRead]:
+        """List all observations in a project, ordered by creation."""
+        return [_observation(obs) for obs in self._engine.list_observations(project_id)]
+
+    def process_observation(
+        self,
+        observation_id: str,
+        action: str,
+        memory_id: str | None = None,
+    ) -> ObservationRead:
+        """Process an observation into knowledge or discard it.
+
+        Actions: "create_memory", "update_memory", "discard".
+        For "update_memory", ``memory_id`` is required.
+        """
+        return _observation(
+            self._engine.process_observation(
+                observation_id=observation_id,
+                action=action,
+                memory_id=memory_id,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Relationship methods
+    # ------------------------------------------------------------------
+
+    def create_relationship(
+        self,
+        project_id: str,
+        from_memory_id: str,
+        to_memory_id: str,
+        type: str,
+    ) -> RelationshipRead:
+        """Create a directed relationship between two memories."""
+        return _relationship(
+            self._engine.create_relationship(
+                project_id=project_id,
+                from_memory_id=from_memory_id,
+                to_memory_id=to_memory_id,
+                type=type,
+            )
+        )
+
+    def list_relationships(self, project_id: str) -> list[RelationshipRead]:
+        """List all relationships in a project, ordered by creation."""
+        return [_relationship(rel) for rel in self._engine.list_relationships(project_id)]
+
+    def get_relationships_for_memory(self, memory_id: str) -> list[RelationshipRead]:
+        """Get all relationships where a memory is source or target."""
+        return [_relationship(rel) for rel in self._engine.get_relationships_for_memory(memory_id)]
+
+    def remove_relationship(self, relationship_id: str) -> None:
+        """Remove a relationship."""
+        self._engine.remove_relationship(relationship_id)
+
 
 __all__ = [
     "Chronicle",
     "UNSET",
     "ChronicleError",
+    "CrossProjectRelationshipError",
     "GitContext",
     "GitContextError",
+    "InvalidObservationActionError",
     "MemoryNotFoundError",
+    "ObservationAlreadyProcessedError",
+    "ObservationNotFoundError",
     "ProjectNotFoundError",
+    "RelationshipNotFoundError",
     "SearchQueryError",
+    "SelfRelationshipError",
     "EvidenceRead",
     "MemoryRead",
     "MemorySummaryRead",
     "MemoryVersionRead",
+    "ObservationRead",
     "ProjectRead",
+    "RelationshipRead",
     "SearchHitRead",
 ]

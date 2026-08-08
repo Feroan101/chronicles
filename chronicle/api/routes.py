@@ -8,8 +8,13 @@ from chronicle.api.schemas import (
     MemorySummaryRead,
     MemoryUpdate,
     MemoryVersionRead,
+    ObservationCreate,
+    ObservationProcess,
+    ObservationRead,
     ProjectCreate,
     ProjectRead,
+    RelationshipCreate,
+    RelationshipRead,
     SearchHitRead,
     VersionCreate,
 )
@@ -125,3 +130,83 @@ def search(
         )
         for result in results
     ]
+
+
+# ------------------------------------------------------------------
+# Observation endpoints
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/projects/{project_id}/observations",
+    response_model=ObservationRead,
+    status_code=201,
+)
+def create_observation(
+    project_id: str, payload: ObservationCreate, engine: Engine
+) -> ObservationRead:
+    return ObservationRead.model_validate(
+        engine.create_observation(project_id=project_id, content=payload.content)
+    )
+
+
+@router.get("/projects/{project_id}/observations", response_model=list[ObservationRead])
+def list_observations(project_id: str, engine: Engine) -> list[ObservationRead]:
+    return [ObservationRead.model_validate(obs) for obs in engine.list_observations(project_id)]
+
+
+@router.post(
+    "/observations/{observation_id}/process",
+    response_model=ObservationRead,
+)
+def process_observation(
+    observation_id: str, payload: ObservationProcess, engine: Engine
+) -> ObservationRead:
+    return ObservationRead.model_validate(
+        engine.process_observation(
+            observation_id=observation_id,
+            action=payload.action,
+            memory_id=payload.memory_id,
+        )
+    )
+
+
+# ------------------------------------------------------------------
+# Relationship endpoints
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/projects/{project_id}/relationships",
+    response_model=RelationshipRead,
+    status_code=201,
+)
+def create_relationship(
+    project_id: str, payload: RelationshipCreate, engine: Engine
+) -> RelationshipRead:
+    return RelationshipRead.model_validate(
+        engine.create_relationship(
+            project_id=project_id,
+            from_memory_id=payload.from_memory_id,
+            to_memory_id=payload.to_memory_id,
+            type=payload.type,
+        )
+    )
+
+
+@router.get("/projects/{project_id}/relationships", response_model=list[RelationshipRead])
+def list_relationships(project_id: str, engine: Engine) -> list[RelationshipRead]:
+    return [RelationshipRead.model_validate(rel) for rel in engine.list_relationships(project_id)]
+
+
+@router.get("/memories/{memory_id}/relationships", response_model=list[RelationshipRead])
+def get_relationships_for_memory(memory_id: str, engine: Engine) -> list[RelationshipRead]:
+    return [
+        RelationshipRead.model_validate(rel)
+        for rel in engine.get_relationships_for_memory(memory_id)
+    ]
+
+
+@router.delete("/relationships/{relationship_id}", status_code=204)
+def remove_relationship(relationship_id: str, engine: Engine) -> None:
+    engine.remove_relationship(relationship_id)

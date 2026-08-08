@@ -30,3 +30,41 @@ class GitContextError(ChronicleError):
         else:
             super().__init__("Invalid Git context: at least one field must be provided")
         self.field = field
+
+
+class ObservationNotFoundError(ChronicleError):
+    def __init__(self, observation_id: str) -> None:
+        super().__init__(f"Observation not found: {observation_id}")
+        self.observation_id = observation_id
+
+
+class InvalidObservationActionError(ChronicleError):
+    def __init__(self, action: str) -> None:
+        super().__init__(
+            f"Invalid observation action: {action!r}. "
+            "Must be 'create_memory', 'update_memory', or 'discard'."
+        )
+        self.action = action
+
+
+class ObservationAlreadyProcessedError(ChronicleError):
+    def __init__(self, observation_id: str, status: str) -> None:
+        super().__init__(f"Observation {observation_id} is already {status}")
+        self.observation_id = observation_id
+        self.status = status
+
+
+class RelationshipNotFoundError(ChronicleError):
+    def __init__(self, relationship_id: str) -> None:
+        super().__init__(f"Relationship not found: {relationship_id}")
+        self.relationship_id = relationship_id
+
+
+class SelfRelationshipError(ChronicleError):
+    def __init__(self) -> None:
+        super().__init__("A Relationship cannot connect a Memory to itself")
+
+
+class CrossProjectRelationshipError(ChronicleError):
+    def __init__(self) -> None:
+        super().__init__("A Relationship cannot connect Memories from different Projects")

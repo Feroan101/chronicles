@@ -92,3 +92,50 @@ class SearchHitRead(BaseModel):
     memory: MemorySummaryRead
     version: MemoryVersionRead
     rank: float
+
+
+# ------------------------------------------------------------------
+# Observation schemas
+# ------------------------------------------------------------------
+
+
+class ObservationCreate(BaseModel):
+    content: str
+
+
+class ObservationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    content: str
+    status: str
+    created_at: datetime
+    processed_at: datetime | None
+
+
+class ObservationProcess(BaseModel):
+    action: str
+    memory_id: str | None = None
+
+
+# ------------------------------------------------------------------
+# Relationship schemas
+# ------------------------------------------------------------------
+
+
+class RelationshipCreate(BaseModel):
+    from_memory_id: str
+    to_memory_id: str
+    type: str
+
+
+class RelationshipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    from_memory_id: str
+    to_memory_id: str
+    type: str
+    created_at: datetime
