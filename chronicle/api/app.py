@@ -10,10 +10,12 @@ from chronicle.api.routes import router
 from chronicle.core import (
     ChronicleEngine,
     ChronicleError,
+    ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
     GitContextError,
     InvalidObservationActionError,
     MemoryNotFoundError,
+    MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
     ProjectNotFoundError,
@@ -28,6 +30,7 @@ DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
 _STATUS_CODES: dict[type[ChronicleError], int] = {
     ProjectNotFoundError: 404,
     MemoryNotFoundError: 404,
+    MemoryVersionNotFoundError: 404,
     ObservationNotFoundError: 404,
     RelationshipNotFoundError: 404,
     SnapshotNotFoundError: 404,
@@ -37,6 +40,7 @@ _STATUS_CODES: dict[type[ChronicleError], int] = {
     ObservationAlreadyProcessedError: 400,
     SelfRelationshipError: 400,
     CrossProjectRelationshipError: 400,
+    ConfidenceScoreRangeError: 400,
 }
 
 

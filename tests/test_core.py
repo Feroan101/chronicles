@@ -1,9 +1,11 @@
 import pytest
 from chronicle.core import (
     ChronicleEngine,
+    ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
     InvalidObservationActionError,
     MemoryNotFoundError,
+    MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
     ProjectNotFoundError,
@@ -525,3 +527,115 @@ def test_snapshot_is_immutable(engine):
     fetched = engine.get_snapshot(snapshot.id)
     assert len(fetched.members) == 1
     assert fetched.members[0].memory_version_id == memory.versions[0].id
+
+
+# ------------------------------------------------------------------
+# Confidence tests
+# ------------------------------------------------------------------
+
+
+def test_record_confidence(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    record = engine.record_confidence(
+        memory_id=memory.id, sequence=1, score=0.8, reason="well supported"
+    )
+
+    assert record.score == 0.8
+    assert record.reason == "well supported"
+    assert record.memory_version_id == memory.versions[0].id
+
+
+def test_record_confidence_unknown_memory_raises(engine):
+    with pytest.raises(MemoryNotFoundError):
+        engine.record_confidence(memory_id="missing", sequence=1, score=0.5)
+
+
+def test_record_confidence_unknown_version_raises(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    with pytest.raises(MemoryVersionNotFoundError):
+        engine.record_confidence(memory_id=memory.id, sequence=99, score=0.5)
+
+
+def test_record_confidence_out_of_range_raises(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    with pytest.raises(ConfidenceScoreRangeError):
+        engine.record_confidence(memory_id=memory.id, sequence=1, score=1.5)
+
+    with pytest.raises(ConfidenceScoreRangeError):
+        engine.record_confidence(memory_id=memory.id, sequence=1, score=-0.1)
+
+
+def test_record_confidence_boundary_values(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    low = engine.record_confidence(memory_id=memory.id, sequence=1, score=0.0)
+    assert low.score == 0.0
+
+    high = engine.record_confidence(memory_id=memory.id, sequence=1, score=1.0)
+    assert high.score == 1.0
+
+
+def test_get_confidence_returns_latest(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.5)
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.9)
+
+    current = engine.get_confidence(memory_id=memory.id, sequence=1)
+    assert current is not None
+    assert current.score == 0.9
+
+
+def test_get_confidence_no_records_returns_none(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    assert engine.get_confidence(memory_id=memory.id, sequence=1) is None
+
+
+def test_get_confidence_unknown_memory_raises(engine):
+    with pytest.raises(MemoryNotFoundError):
+        engine.get_confidence(memory_id="missing", sequence=1)
+
+
+def test_get_confidence_history_returns_all(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.3, reason="initial")
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.7, reason="updated")
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.9, reason="final")
+
+    history = engine.get_confidence_history(memory_id=memory.id, sequence=1)
+    assert len(history) == 3
+    assert [s.score for s in history] == [0.3, 0.7, 0.9]
+    assert [s.reason for s in history] == ["initial", "updated", "final"]
+
+
+def test_get_confidence_history_empty(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    history = engine.get_confidence_history(memory_id=memory.id, sequence=1)
+    assert history == []
+
+
+def test_get_confidence_history_unknown_memory_raises(engine):
+    with pytest.raises(MemoryNotFoundError):
+        engine.get_confidence_history(memory_id="missing", sequence=1)
+
+
+def test_confidence_without_reason(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    record = engine.record_confidence(memory_id=memory.id, sequence=1, score=0.6)
+    assert record.reason is None

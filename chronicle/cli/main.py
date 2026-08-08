@@ -1,5 +1,6 @@
 import typer
 
+from chronicle.cli.confidence import confidence_app
 from chronicle.cli.init import init_command
 from chronicle.cli.memory import memory_app
 from chronicle.cli.observation import observation_app
@@ -19,6 +20,7 @@ app.add_typer(version_app, name="version")
 app.add_typer(observation_app, name="observation")
 app.add_typer(relationship_app, name="relationship")
 app.add_typer(snapshot_app, name="snapshot")
+app.add_typer(confidence_app, name="confidence")
 
 
 if __name__ == "__main__":

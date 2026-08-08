@@ -57,6 +57,8 @@ def test_application_startup_serves_docs_and_schema(client):
         "/relationships/{relationship_id}",
         "/projects/{project_id}/snapshots",
         "/snapshots/{snapshot_id}",
+        "/memories/{memory_id}/versions/{sequence}/confidence",
+        "/memories/{memory_id}/versions/{sequence}/confidence/history",
     }
 
 
@@ -606,3 +608,113 @@ def test_snapshot_immutable_after_creation(client, project_id):
     body = response.json()
     assert len(body["members"]) == 1
     assert body["members"][0]["memory_version_id"] == memory["versions"][0]["id"]
+
+
+# ------------------------------------------------------------------
+# Confidence API tests
+# ------------------------------------------------------------------
+
+
+def test_record_confidence(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.8, "reason": "well supported"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["score"] == 0.8
+    assert body["reason"] == "well supported"
+    assert body["memory_version_id"] == memory["versions"][0]["id"]
+
+
+def test_record_confidence_without_reason(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.5},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["score"] == 0.5
+    assert body["reason"] is None
+
+
+def test_record_confidence_out_of_range_returns_400(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 1.5},
+    )
+    assert response.status_code == 400
+    assert "between 0.0 and 1.0" in response.json()["detail"]
+
+
+def test_record_confidence_unknown_memory_returns_404(client):
+    response = client.post(
+        "/memories/missing/versions/1/confidence",
+        json={"score": 0.5},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Memory not found: missing"}
+
+
+def test_record_confidence_unknown_version_returns_404(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.post(
+        f"/memories/{memory['id']}/versions/99/confidence",
+        json={"score": 0.5},
+    )
+    assert response.status_code == 404
+    assert "Memory version not found" in response.json()["detail"]
+
+
+def test_get_confidence(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.7},
+    )
+
+    response = client.get(f"/memories/{memory['id']}/versions/1/confidence")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score"] == 0.7
+
+
+def test_get_confidence_no_records(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.get(f"/memories/{memory['id']}/versions/1/confidence")
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_get_confidence_history(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.3, "reason": "initial"},
+    )
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.9, "reason": "updated"},
+    )
+
+    response = client.get(f"/memories/{memory['id']}/versions/1/confidence/history")
+    assert response.status_code == 200
+    history = response.json()
+    assert len(history) == 2
+    assert [s["score"] for s in history] == [0.3, 0.9]
+
+
+def test_get_confidence_history_empty(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.get(f"/memories/{memory['id']}/versions/1/confidence/history")
+    assert response.status_code == 200
+    assert response.json() == []

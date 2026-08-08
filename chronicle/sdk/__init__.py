@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    ConfidenceRead,
     EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
@@ -34,11 +35,13 @@ from chronicle.api.schemas import (
 from chronicle.core import (
     ChronicleEngine,
     ChronicleError,
+    ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
     GitContext,
     GitContextError,
     InvalidObservationActionError,
     MemoryNotFoundError,
+    MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
     ProjectNotFoundError,
@@ -313,16 +316,56 @@ class Chronicle:
         """List all snapshots for a project."""
         return [_snapshot(snapshot) for snapshot in self._engine.list_snapshots(project_id)]
 
+    # ------------------------------------------------------------------
+    # Confidence methods
+    # ------------------------------------------------------------------
+
+    def record_confidence(
+        self,
+        memory_id: str,
+        sequence: int,
+        score: float,
+        reason: str | None = None,
+    ) -> ConfidenceRead:
+        """Record a confidence score for a specific memory version.
+
+        Scores must be between 0.0 and 1.0 inclusive.
+        """
+        return ConfidenceRead.model_validate(
+            self._engine.record_confidence(
+                memory_id=memory_id, sequence=sequence, score=score, reason=reason
+            )
+        )
+
+    def get_confidence(self, memory_id: str, sequence: int) -> ConfidenceRead | None:
+        """Get the current confidence score for a memory version.
+
+        Returns None if no confidence has been recorded.
+        """
+        score = self._engine.get_confidence(memory_id=memory_id, sequence=sequence)
+        if score is None:
+            return None
+        return ConfidenceRead.model_validate(score)
+
+    def get_confidence_history(self, memory_id: str, sequence: int) -> list[ConfidenceRead]:
+        """Get the full confidence history for a memory version."""
+        return [
+            ConfidenceRead.model_validate(s)
+            for s in self._engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
+        ]
+
 
 __all__ = [
     "Chronicle",
     "UNSET",
     "ChronicleError",
+    "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
     "GitContext",
     "GitContextError",
     "InvalidObservationActionError",
     "MemoryNotFoundError",
+    "MemoryVersionNotFoundError",
     "ObservationAlreadyProcessedError",
     "ObservationNotFoundError",
     "ProjectNotFoundError",
@@ -330,6 +373,7 @@ __all__ = [
     "SearchQueryError",
     "SelfRelationshipError",
     "SnapshotNotFoundError",
+    "ConfidenceRead",
     "EvidenceRead",
     "MemoryRead",
     "MemorySummaryRead",

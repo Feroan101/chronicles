@@ -80,6 +80,9 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "create_snapshot",
             "get_snapshot",
             "list_snapshots",
+            "record_confidence",
+            "get_confidence",
+            "get_confidence_history",
         }
 
 
@@ -419,3 +422,96 @@ async def test_snapshot_immutable_after_creation(server_dir):
         fetched = await _ok(session, "get_snapshot", {"snapshot_id": snapshot["id"]})
         assert len(fetched["members"]) == 1
         assert fetched["members"][0]["memory_version_id"] == memory["versions"][0]["id"]
+
+
+@pytest.mark.anyio
+async def test_record_confidence(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+
+        record = await _ok(
+            session,
+            "record_confidence",
+            {"memory_id": memory["id"], "sequence": 1, "score": 0.8, "reason": "well supported"},
+        )
+
+        assert record["score"] == 0.8
+        assert record["reason"] == "well supported"
+        assert record["memory_version_id"] == memory["versions"][0]["id"]
+
+
+@pytest.mark.anyio
+async def test_get_confidence(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+        await _ok(
+            session,
+            "record_confidence",
+            {"memory_id": memory["id"], "sequence": 1, "score": 0.7},
+        )
+
+        result = await _ok(session, "get_confidence", {"memory_id": memory["id"], "sequence": 1})
+
+        assert result["score"] == 0.7
+
+
+@pytest.mark.anyio
+async def test_get_confidence_no_records(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+
+        result = await _ok(session, "get_confidence", {"memory_id": memory["id"], "sequence": 1})
+        assert result == {}
+
+
+@pytest.mark.anyio
+async def test_get_confidence_history(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+        await _ok(
+            session,
+            "record_confidence",
+            {"memory_id": memory["id"], "sequence": 1, "score": 0.3},
+        )
+        await _ok(
+            session,
+            "record_confidence",
+            {"memory_id": memory["id"], "sequence": 1, "score": 0.9},
+        )
+
+        history = await _ok_list(
+            session,
+            "get_confidence_history",
+            {"memory_id": memory["id"], "sequence": 1},
+        )
+
+        assert len(history) == 2
+        assert [s["score"] for s in history] == [0.3, 0.9]
+
+
+@pytest.mark.anyio
+async def test_record_confidence_out_of_range_errors(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+
+        result = await session.call_tool(
+            "record_confidence",
+            {"memory_id": memory["id"], "sequence": 1, "score": 1.5},
+        )
+        assert result.isError
+        assert "between 0.0 and 1.0" in result.content[0].text

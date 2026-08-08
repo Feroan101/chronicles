@@ -1,4 +1,5 @@
 from chronicle.storage.base import Repository
+from chronicle.storage.confidence_repository import ConfidenceRepository
 from chronicle.storage.evidence_repository import EvidenceRepository
 from chronicle.storage.memory_repository import MemoryRepository
 from chronicle.storage.memory_version_repository import MemoryVersionRepository
@@ -11,6 +12,7 @@ from chronicle.storage.snapshot_repository import SnapshotRepository
 
 __all__ = [
     "Repository",
+    "ConfidenceRepository",
     "EvidenceRepository",
     "MemoryRepository",
     "MemoryVersionRepository",

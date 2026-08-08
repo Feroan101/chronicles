@@ -177,3 +177,23 @@ class SnapshotRead(BaseModel):
     created_at: datetime
     members: list[SnapshotMemberRead]
     snapshot_relationships: list[SnapshotRelationshipRead]
+
+
+# ------------------------------------------------------------------
+# Confidence schemas
+# ------------------------------------------------------------------
+
+
+class ConfidenceRecord(BaseModel):
+    score: float
+    reason: str | None = None
+
+
+class ConfidenceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    memory_version_id: str
+    score: float
+    reason: str | None
+    recorded_at: datetime

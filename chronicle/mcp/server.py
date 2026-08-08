@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    ConfidenceRead,
     EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
@@ -61,6 +62,12 @@ def _relationship(relationship) -> dict:
 
 def _snapshot(snapshot) -> dict:
     return SnapshotRead.model_validate(snapshot).model_dump(mode="json")
+
+
+def _confidence(score) -> dict | None:
+    if score is None:
+        return None
+    return ConfidenceRead.model_validate(score).model_dump(mode="json")
 
 
 def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> FastMCP:
@@ -366,6 +373,58 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             project_id: The project ID.
         """
         return [_snapshot(snapshot) for snapshot in engine.list_snapshots(project_id)]
+
+    # ------------------------------------------------------------------
+    # Confidence tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def record_confidence(
+        memory_id: str, sequence: int, score: float, reason: str | None = None
+    ) -> dict:
+        """Record a confidence score for a specific memory version.
+
+        Scores must be between 0.0 and 1.0 inclusive.
+
+        Args:
+            memory_id: The memory ID.
+            sequence: The version sequence number.
+            score: Confidence score (0.0 to 1.0).
+            reason: Optional reason for the score.
+        """
+        return _confidence(
+            engine.record_confidence(
+                memory_id=memory_id, sequence=sequence, score=score, reason=reason
+            )
+        )
+
+    @server.tool()
+    def get_confidence(memory_id: str, sequence: int) -> dict:
+        """Get the current confidence score for a memory version.
+
+        Returns an empty object if no confidence has been recorded.
+
+        Args:
+            memory_id: The memory ID.
+            sequence: The version sequence number.
+        """
+        score = engine.get_confidence(memory_id=memory_id, sequence=sequence)
+        if score is None:
+            return {}
+        return ConfidenceRead.model_validate(score).model_dump(mode="json")
+
+    @server.tool()
+    def get_confidence_history(memory_id: str, sequence: int) -> list:
+        """Get the full confidence history for a memory version.
+
+        Args:
+            memory_id: The memory ID.
+            sequence: The version sequence number.
+        """
+        return [
+            ConfidenceRead.model_validate(s).model_dump(mode="json")
+            for s in engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
+        ]
 
     return server
 

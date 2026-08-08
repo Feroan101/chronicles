@@ -75,3 +75,16 @@ class RelationshipNotFoundError(ChronicleError):
 class CrossProjectRelationshipError(ChronicleError):
     def __init__(self) -> None:
         super().__init__("A Relationship cannot connect Memories from different Projects")
+
+
+class MemoryVersionNotFoundError(ChronicleError):
+    def __init__(self, memory_id: str, sequence: int) -> None:
+        super().__init__(f"Memory version not found: {memory_id} v{sequence}")
+        self.memory_id = memory_id
+        self.sequence = sequence
+
+
+class ConfidenceScoreRangeError(ChronicleError):
+    def __init__(self, score: float) -> None:
+        super().__init__(f"Confidence score must be between 0.0 and 1.0, got {score}")
+        self.score = score

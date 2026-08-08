@@ -6,9 +6,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.core.errors import (
+    ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
     InvalidObservationActionError,
     MemoryNotFoundError,
+    MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
     ProjectNotFoundError,
@@ -18,6 +20,7 @@ from chronicle.core.errors import (
 )
 from chronicle.core.git import GitContext
 from chronicle.models import (
+    ConfidenceScore,
     Evidence,
     Memory,
     MemoryVersion,
@@ -29,6 +32,7 @@ from chronicle.models import (
     SnapshotRelationship,
 )
 from chronicle.storage import (
+    ConfidenceRepository,
     EvidenceRepository,
     MemoryRepository,
     MemoryVersionRepository,
@@ -438,3 +442,58 @@ class ChronicleEngine:
                 _ = snapshot.members
                 _ = snapshot.snapshot_relationships
             return snapshots
+
+    # ------------------------------------------------------------------
+    # Confidence operations
+    # ------------------------------------------------------------------
+
+    def record_confidence(
+        self,
+        memory_id: str,
+        sequence: int,
+        score: float,
+        reason: str | None = None,
+    ) -> ConfidenceScore:
+        """Record a confidence score for a specific Memory Version.
+
+        Scores must be between 0.0 and 1.0 inclusive. Each call appends
+        a new record; the current confidence is the most recent entry.
+        """
+        if not (0.0 <= score <= 1.0):
+            raise ConfidenceScoreRangeError(score)
+
+        with self._transaction() as session:
+            if MemoryRepository(session).get(memory_id) is None:
+                raise MemoryNotFoundError(memory_id)
+            version = MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+            if version is None:
+                raise MemoryVersionNotFoundError(memory_id, sequence)
+
+            record = ConfidenceScore(
+                id=new_uuid(),
+                memory_version_id=version.id,
+                score=score,
+                reason=reason,
+                recorded_at=utcnow(),
+            )
+            return ConfidenceRepository(session).create(record)
+
+    def get_confidence(self, memory_id: str, sequence: int) -> ConfidenceScore | None:
+        """Get the current (most recent) confidence score for a Memory Version."""
+        with self._transaction() as session:
+            if MemoryRepository(session).get(memory_id) is None:
+                raise MemoryNotFoundError(memory_id)
+            version = MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+            if version is None:
+                raise MemoryVersionNotFoundError(memory_id, sequence)
+            return ConfidenceRepository(session).latest_by_version(version.id)
+
+    def get_confidence_history(self, memory_id: str, sequence: int) -> list[ConfidenceScore]:
+        """Get the full confidence history for a Memory Version."""
+        with self._transaction() as session:
+            if MemoryRepository(session).get(memory_id) is None:
+                raise MemoryNotFoundError(memory_id)
+            version = MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+            if version is None:
+                raise MemoryVersionNotFoundError(memory_id, sequence)
+            return ConfidenceRepository(session).list_by_version(version.id)

@@ -2,6 +2,8 @@ from fastapi import APIRouter, Query
 
 from chronicle.api.deps import Engine
 from chronicle.api.schemas import (
+    ConfidenceRead,
+    ConfidenceRecord,
     EvidenceRead,
     MemoryCreate,
     MemoryRead,
@@ -238,3 +240,46 @@ def get_snapshot(snapshot_id: str, engine: Engine) -> SnapshotRead:
     if snapshot is None:
         raise SnapshotNotFoundError(snapshot_id)
     return SnapshotRead.model_validate(snapshot)
+
+
+# ------------------------------------------------------------------
+# Confidence endpoints
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/memories/{memory_id}/versions/{sequence}/confidence",
+    response_model=ConfidenceRead,
+    status_code=201,
+)
+def record_confidence(
+    memory_id: str, sequence: int, payload: ConfidenceRecord, engine: Engine
+) -> ConfidenceRead:
+    return ConfidenceRead.model_validate(
+        engine.record_confidence(
+            memory_id=memory_id,
+            sequence=sequence,
+            score=payload.score,
+            reason=payload.reason,
+        )
+    )
+
+
+@router.get(
+    "/memories/{memory_id}/versions/{sequence}/confidence",
+    response_model=ConfidenceRead | None,
+)
+def get_confidence(memory_id: str, sequence: int, engine: Engine) -> ConfidenceRead | None:
+    score = engine.get_confidence(memory_id=memory_id, sequence=sequence)
+    if score is None:
+        return None
+    return ConfidenceRead.model_validate(score)
+
+
+@router.get(
+    "/memories/{memory_id}/versions/{sequence}/confidence/history",
+    response_model=list[ConfidenceRead],
+)
+def get_confidence_history(memory_id: str, sequence: int, engine: Engine) -> list[ConfidenceRead]:
+    history = engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
+    return [ConfidenceRead.model_validate(s) for s in history]
