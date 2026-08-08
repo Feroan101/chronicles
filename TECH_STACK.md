@@ -98,18 +98,22 @@ It MUST be used for:
 
 # Database
 
-## SQLite
+## PostgreSQL (V1 Target)
 
-SQLite is the storage engine for Chronicle Version 1.
+PostgreSQL is the target database for Chronicle V1.
 
 It provides:
 
-* Local-first operation
-* Zero configuration
 * Reliable persistence
-* Full-text search (FTS5)
+* ACID compliance
+* Strong relational capabilities
+* Production-ready performance
 
-PostgreSQL may be used in future versions for multi-user or server deployments.
+### Current Implementation
+
+SQLite is the storage engine for the v0.1.0 foundation release. It provides local-first operation, zero configuration, reliable persistence, and full-text search (FTS5).
+
+SQLite MAY be used for local development or testing where appropriate.
 
 ---
 
@@ -139,6 +143,39 @@ Alembic is the official migration tool.
 Database schema changes MUST be managed through migrations.
 
 Manual schema modifications SHOULD be avoided.
+
+---
+
+# AI Framework
+
+## LangChain (V1)
+
+LangChain is the planned framework for AI integrations in V1.
+
+LangChain MAY be used for:
+
+* LLM integrations
+* Prompt workflows
+* Model interaction
+* AI utilities
+
+The Chronicle Core MUST remain independent of LangChain.
+
+---
+
+# Agent Orchestration
+
+## LangGraph (V1)
+
+LangGraph is the planned framework for agent orchestration in V1.
+
+It MAY be used for:
+
+* Multi-step agent workflows
+* Agent state management
+* Agent coordination
+
+Chronicle Core MUST remain independent of LangGraph.
 
 ---
 
@@ -183,6 +220,34 @@ All code SHOULD pass Ruff checks before being committed.
 
 ---
 
+# Containerization
+
+## Docker (V1)
+
+Docker is the planned containerization platform for V1.
+
+Docker SHOULD be used for:
+
+* Development environments
+* Local deployments
+* Production deployments
+
+---
+
+# Continuous Integration
+
+## GitHub Actions (V1)
+
+GitHub Actions is the planned CI platform for V1.
+
+Continuous Integration SHOULD include:
+
+* Linting
+* Testing
+* Build verification
+
+---
+
 # Architecture Principles
 
 Technology choices MUST support the following architecture.
@@ -204,7 +269,7 @@ Storage Layer
 
 ↓
 
-SQLite
+PostgreSQL (V1 Target) / SQLite (Current)
 
 The Chronicle Core is the heart of the system.
 
@@ -224,6 +289,7 @@ The Chronicle Core:
 * MUST NOT depend on LangGraph.
 * MUST NOT depend on MCP.
 * MUST NOT contain interface-specific logic.
+* MUST NOT depend on Docker or GitHub Actions.
 
 Interfaces depend on the Core.
 
@@ -245,18 +311,23 @@ Technology choices MUST prioritize simplicity over novelty.
 
 # Approved Technology Stack
 
-| Category               | Technology     |
-| ---------------------- | -------------- |
-| Language               | Python 3.13+   |
-| Package Management     | uv             |
-| CLI                    | Typer          |
-| REST API               | FastAPI        |
-| Data Validation        | Pydantic v2    |
-| Database               | SQLite         |
-| ORM                    | SQLAlchemy 2   |
-| Database Migrations    | Alembic        |
-| AI Communication       | MCP            |
-| Testing                | pytest         |
-| Linting & Formatting   | Ruff           |
+| Category               | Technology              |
+| ---------------------- | ----------------------- |
+| Language               | Python 3.13+            |
+| Package Management     | uv                      |
+| CLI                    | Typer                   |
+| REST API               | FastAPI                 |
+| Data Validation        | Pydantic v2             |
+| Database (Current)     | SQLite                  |
+| Database (V1 Target)   | PostgreSQL              |
+| ORM                    | SQLAlchemy 2            |
+| Database Migrations    | Alembic                 |
+| AI Framework (V1)      | LangChain               |
+| Agent Orchestration (V1)| LangGraph               |
+| AI Communication       | MCP                     |
+| Testing                | pytest                  |
+| Linting & Formatting   | Ruff                    |
+| Containerization (V1)  | Docker                  |
+| CI (V1)                | GitHub Actions          |
 
 This document serves as the authoritative reference for Chronicle's implementation stack.

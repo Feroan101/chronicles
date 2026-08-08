@@ -124,7 +124,7 @@ uv run alembic upgrade head
 uv run alembic check
 ```
 
-SQLite remains the V1 storage engine.
+SQLite is the current storage engine; PostgreSQL is the V1 target.
 
 ## Tests
 

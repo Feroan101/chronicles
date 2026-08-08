@@ -248,7 +248,96 @@ Search behavior is defined by the Search Specification.
 
 ---
 
-## 6. Storage Abstraction
+## 6. Implemented V1 Tables
+
+The following tables are implemented and shipped:
+
+### 6.1 snapshots
+
+Stores Snapshot objects. Snapshots are immutable captures of Project knowledge state.
+
+| Column        | Type      | Constraints            | Description                              |
+|---------------|-----------|------------------------|------------------------------------------|
+| id            | TEXT      | PRIMARY KEY            | Snapshot identity (UUID).                |
+| project_id    | TEXT      | NOT NULL, FK projects  | Owning Project.                          |
+| parent_id     | TEXT      | FK snapshots           | Parent snapshot (single-parent history). |
+| message       | TEXT      |                        | Snapshot message.                        |
+| created_at    | TIMESTAMP | NOT NULL               | Creation time (UTC).                     |
+
+Constraints:
+
+* A Snapshot belongs to exactly one Project.
+* A Snapshot represents one point in time.
+* A Snapshot is immutable; its rows are never modified.
+* A Snapshot does not contain source code.
+* Snapshot history forms a chain through `parent_id`.
+
+---
+
+### 6.2 snapshot_members
+
+Captures the knowledge state recorded by each Snapshot.
+
+| Column             | Type      | Constraints                | Description                      |
+|--------------------|-----------|----------------------------|----------------------------------|
+| snapshot_id        | TEXT      | NOT NULL, FK snapshots     | Owning Snapshot.                 |
+| memory_version_id  | TEXT      | NOT NULL, FK memory_versions | Version captured by Snapshot.  |
+
+Constraints:
+
+* `PRIMARY KEY (snapshot_id, memory_version_id)`.
+* A Snapshot captures each Memory through its Current Version at creation time.
+* A Snapshot captures only one Version per Memory.
+* Changes made after a Snapshot is created never modify existing `snapshot_members` rows.
+
+---
+
+### 6.3 snapshot_relationships
+
+Captures the relationships present in each Snapshot.
+
+| Column             | Type      | Constraints                | Description                     |
+|--------------------|-----------|----------------------------|---------------------------------|
+| snapshot_id        | TEXT      | NOT NULL, FK snapshots     | Owning Snapshot.                |
+| relationship_id    | TEXT      | NOT NULL, FK relationships | Relationship captured.          |
+| from_memory_id     | TEXT      | NOT NULL                   | Source Memory at capture time.  |
+| to_memory_id       | TEXT      | NOT NULL                   | Target Memory at capture time.  |
+| type               | TEXT      | NOT NULL                   | Type at capture time.           |
+
+Constraints:
+
+* `PRIMARY KEY (snapshot_id, relationship_id)`.
+* Captures the state of each relationship exactly as it existed at creation time.
+* Snapshots therefore preserve relationship history without rewriting past states.
+
+---
+
+## 7. Planned V1 Tables
+
+> [!NOTE]
+> The following tables are planned but not yet implemented.
+
+### 7.1 branches
+
+Stores branch references. A branch is a named pointer to a Snapshot.
+
+| Column            | Type      | Constraints                | Description                    |
+|-------------------|-----------|----------------------------|--------------------------------|
+| project_id        | TEXT      | NOT NULL, FK projects      | Owning Project.                |
+| name              | TEXT      | NOT NULL                   | Branch name.                   |
+| head_snapshot_id  | TEXT      | NOT NULL, FK snapshots     | Snapshot the branch points at. |
+| created_at        | TIMESTAMP | NOT NULL                   | Creation time (UTC).           |
+| updated_at        | TIMESTAMP | NOT NULL                   | Last move time (UTC).          |
+
+Constraints:
+
+* `PRIMARY KEY (project_id, name)` — a branch name is unique within a Project.
+* A branch points at a single Snapshot (its head).
+* Branch state is derived from the head Snapshot and its history.
+
+---
+
+## 8. Storage Abstraction
 
 The schema is accessed exclusively through the Storage Engine.
 
@@ -258,7 +347,7 @@ The Storage Engine is the only component that executes schema-level operations.
 
 ---
 
-## 7. Scope Boundaries
+## 9. Scope Boundaries
 
 This document defines the persistent data model for Version 1.
 

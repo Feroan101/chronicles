@@ -177,28 +177,27 @@ The tool set mirrors the Chronicle REST API:
 | --- | --- |
 | `create_project` | Create a new project (`name`, optional `description`). |
 | `get_project` | Get a project by ID. |
-| `create_memory` | Store a memory in a project (`project_id`, `content`, optional `type`, `context`, `git_context`). Creates the initial version. `git_context` (optional `branch`, `commit`, `description`) is recorded as Evidence on that version. |
-| `get_memory` | Get a memory and its version history by ID. Version output includes the grouped `git_context` where present. |
+| `create_memory` | Store a memory in a project (`project_id`, `content`, optional `type`, `context`). Creates the initial version. |
+| `get_memory` | Get a memory and its version history by ID. |
 | `list_memories` | List all memories in a project, ordered by creation. |
-| `update_memory` | Update a memory's `type`. Passing null or omitting `type` leaves the memory unchanged. Does not accept a Git context. |
-| `create_version` | Append a new version of a memory (`memory_id`, `content`, optional `context`, `git_context`). `git_context` is recorded as Evidence on the appended version. |
-| `get_evidence` | Get the raw Evidence rows for a version (`memory_id`, `sequence`), including `evidence_type` and `ref`. |
+| `update_memory` | Update a memory's `type`. Passing null or omitting `type` leaves the memory unchanged. |
+| `create_version` | Append a new version of a memory (`memory_id`, `content`, optional `context`). |
+| `get_evidence` | Get evidence attached to a specific version. |
 | `search` | Search project knowledge (`query`, optional `project_id` filter). Returns current-version hits with rank. |
-
-### Git context
-
-The `git_context` argument carries three optional fields — `branch`, `commit`,
-and `description` — with at least one required. Values are opaque strings;
-only non-empty (non-whitespace) values are accepted, with no format validation.
-The Git context is recorded as Evidence on the exact version the operation
-creates, and version output carries the grouped `git_context` alongside the raw
-Evidence rows. Invalid Git context values fail the tool with a
-`GitContextError` and create nothing.
+| `create_observation` | Create a pending observation in a project. |
+| `list_observations` | List all observations in a project. |
+| `process_observation` | Process an observation into knowledge or discard it. |
+| `create_relationship` | Create a directed relationship between two memories. |
+| `list_relationships` | List all relationships in a project. |
+| `get_relationships_for_memory` | Get all relationships where a memory is source or target. |
+| `remove_relationship` | Remove a relationship. |
+| `create_snapshot` | Create a snapshot of the project's current knowledge state. |
+| `get_snapshot` | Get a snapshot by ID. |
+| `list_snapshots` | List all snapshots for a project. |
 
 Tool outputs are the same JSON shapes as the REST API responses. Errors from
-Core (e.g. `ProjectNotFoundError`, `MemoryNotFoundError`, `SearchQueryError`,
-`GitContextError`) surface as MCP tool errors (`isError` results) carrying the
-domain message.
+Core (e.g. `ProjectNotFoundError`, `MemoryNotFoundError`, `SearchQueryError`)
+surface as MCP tool errors (`isError` results) carrying the domain message.
 
 ### Design Principles
 

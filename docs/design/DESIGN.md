@@ -53,17 +53,30 @@ The following capabilities define the scope of Version 1.
 
 ## Included
 
+### Implemented (v0.1.0 Foundation)
+
 * Local-first operation
 * Repository-scoped knowledge
-* Immutable knowledge versions
-* Structured knowledge objects
+* Structured knowledge objects (Memories, Versions)
 * Evidence tracking
-* Git context integration
+* Knowledge graph (Relationships)
+* Observations
 * Knowledge search (FTS5)
+* Git context integration (manual, explicit)
+* Snapshots (create, retrieve, list)
 * CLI
 * REST API
 * Python SDK
 * MCP Server
+
+### Planned for V1
+
+* Confidence scoring
+* Verification
+* Drift detection
+* Memory decay
+* Branch-aware knowledge
+* Snapshot-based primary storage
 
 ---
 
@@ -82,13 +95,6 @@ The following features are intentionally outside the scope of Version 1.
 * Automatic snapshot acceptance
 * Automatic conflict resolution
 * Distributed deployments
-* Knowledge graph (relationships)
-* Snapshots
-* Branch tracking
-* Confidence scoring
-* Verification
-* Drift detection
-* Automatic Git integration
 
 These features may be considered in future versions but are not part of the Version 1 design.
 
@@ -130,11 +136,13 @@ They are integration mechanisms, not hosted services.
 
 # Snapshot-Based Knowledge
 
-Chronicle stores engineering knowledge as immutable snapshots.
+Chronicle captures project knowledge state as immutable snapshots.
 
-Snapshots represent the project's understanding at a specific point in time.
+A snapshot records the current Versions of all Memories and the Relationships between them at a specific point in time.
 
-Knowledge evolves by creating new snapshots rather than modifying existing history.
+In the current implementation, Memories and Versions remain the primary knowledge storage. Snapshots provide historical reference points.
+
+In V1, snapshots may become the primary knowledge model, where knowledge evolves by creating new snapshots rather than modifying existing history.
 
 This mirrors Git's immutable commit model.
 
@@ -185,7 +193,7 @@ Chronicle may propose new knowledge.
 
 It never silently commits knowledge into project history.
 
-Every proposed snapshot requires explicit acceptance before becoming part of the repository's permanent understanding.
+In V1, every proposed snapshot requires explicit acceptance before becoming part of the repository's permanent understanding.
 
 ---
 
@@ -198,13 +206,6 @@ Git remains responsible for source code.
 Chronicle remains responsible for engineering knowledge.
 
 Chronicle follows Git's workflow wherever practical, including concepts such as repositories, branches, history, and immutable state.
-
-In Version 1 the Git Integration is manual and explicit: Git context (branch,
-commit, description) is associated with knowledge only when the user or agent
-provides it, and is recorded as Evidence. It does not run Git commands, inspect
-a repository, detect the current branch, or track branches. Branch-aware
-knowledge and repository inspection remain future-version considerations, not
-part of the Version 1 contract (see `spec/GIT_INTEGRATION.md` §11 and §14).
 
 ---
 
@@ -245,15 +246,10 @@ Chronicle Version 1 is considered successful if it can:
 
 * Persist engineering knowledge across AI sessions.
 * Maintain versioned project understanding.
-* Reference knowledge to Git context (branch, commit, description) explicitly.
 * Explain why knowledge exists.
-* Detect stale or drifting knowledge.
 * Allow multiple AI agents to share the same understanding of a repository.
 * Operate entirely on a local machine.
 * Feel familiar to developers who already understand Git.
-
-Branch-aware knowledge (automatic branch tracking) is a future-version goal and
-is not part of the Version 1 contract (see `spec/GIT_INTEGRATION.md` §14).
 
 ---
 

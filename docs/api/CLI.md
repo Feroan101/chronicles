@@ -133,29 +133,7 @@ This preserves the Git-like history concept of Chronicle.
 
 ---
 
-## 7. Git Context
-
-The CLI exposes the same Git Integration behavior as the REST, MCP, and SDK
-interfaces, per the Git Integration Specification.
-
-Commands that create a Memory Version — creating a memory and creating a
-version — accept an optional Git context reference with three fields: `branch`,
-`commit`, and `description` (at least one required). The Git context is
-recorded as Evidence on the exact version created by the command, in the same
-operation.
-
-Values are opaque strings; only non-empty (non-whitespace) values are accepted,
-with no format validation. An invalid Git context fails the command without
-creating anything and is reported as an error.
-
-When displaying a version, the CLI shows the recorded Git context both grouped
-(`branch`, `commit`, `description`) and as the underlying Evidence rows.
-
-Updating a memory attribute does not accept a Git context.
-
----
-
-## 8. Design Principles
+## 7. Design Principles
 
 ### Simple Interface
 
@@ -181,7 +159,7 @@ The CLI should expose Chronicle's versioned knowledge model.
 
 ---
 
-## 9. Scope Boundaries
+## 8. Scope Boundaries
 
 This document defines the CLI interface concept.
 
