@@ -26,3 +26,14 @@ class MemoryVersionRepository(Repository):
             select(func.max(MemoryVersion.sequence)).where(MemoryVersion.memory_id == memory_id)
         )
         return 0 if highest is None else highest
+
+    def highest_sequences(self, memory_ids: list[str]) -> dict[str, int]:
+        """Return the highest sequence for each Memory id."""
+        if not memory_ids:
+            return {}
+        rows = self._session.execute(
+            select(MemoryVersion.memory_id, func.max(MemoryVersion.sequence))
+            .where(MemoryVersion.memory_id.in_(memory_ids))
+            .group_by(MemoryVersion.memory_id)
+        )
+        return {memory_id: sequence for memory_id, sequence in rows}

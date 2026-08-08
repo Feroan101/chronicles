@@ -12,3 +12,12 @@ class MemoryNotFoundError(ChronicleError):
     def __init__(self, memory_id: str) -> None:
         super().__init__(f"Memory not found: {memory_id}")
         self.memory_id = memory_id
+
+
+class SearchQueryError(ChronicleError):
+    def __init__(self, query: str, detail: str | None = None) -> None:
+        if detail is not None:
+            super().__init__(f"Invalid search query {query!r}: {detail}")
+        else:
+            super().__init__(f"Invalid search query: {query}")
+        self.query = query

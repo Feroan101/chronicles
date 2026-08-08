@@ -1,9 +1,15 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from chronicle.core.errors import MemoryNotFoundError, ProjectNotFoundError
+from chronicle.core.errors import (
+    MemoryNotFoundError,
+    ProjectNotFoundError,
+    SearchQueryError,
+)
 from chronicle.models import Memory, MemoryVersion, Project
 from chronicle.storage import (
     MemoryRepository,
@@ -13,6 +19,15 @@ from chronicle.storage import (
 from chronicle.utils.ids import new_uuid
 
 _UNSET = object()
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """A Memory matched by search, together with its Current Version."""
+
+    memory: Memory
+    version: MemoryVersion
+    rank: float
 
 
 class ChronicleEngine:
@@ -104,3 +119,27 @@ class ChronicleEngine:
     def list_memories(self, project_id: str) -> list[Memory]:
         with self._transaction() as session:
             return MemoryRepository(session).list_by_project(project_id)
+
+    def search(self, query: str, project_id: str | None = None) -> list[SearchResult]:
+        """Search Memories by keyword content.
+
+        Only the Current Version of each Memory is returned, and each Memory
+        appears at most once. When ``project_id`` is supplied, results are
+        restricted to that Project.
+        """
+        if not query or not query.strip():
+            raise SearchQueryError(query)
+        with self._transaction() as session:
+            try:
+                rows = MemoryRepository(session).search(query, project_id)
+            except OperationalError as exc:
+                raise SearchQueryError(query, detail=str(exc)) from exc
+            current_sequences = MemoryVersionRepository(session).highest_sequences(
+                [memory.id for memory, _, _ in rows]
+            )
+            results = []
+            for memory, version, rank in rows:
+                if version.sequence != current_sequences.get(memory.id):
+                    continue
+                results.append(SearchResult(memory=memory, version=version, rank=rank))
+            return results

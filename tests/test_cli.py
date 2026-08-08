@@ -127,3 +127,49 @@ def test_unknown_project_and_memory_errors(project_dir: Path):
     )
     assert bad_memory.exit_code == 1
     assert "Memory not found" in bad_memory.output
+
+
+def test_search_command(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+    memory_id = _first_uuid(
+        runner.invoke(
+            app,
+            [
+                "memory",
+                "create",
+                "--project-id",
+                project_id,
+                "--content",
+                "Uses Flask for the web layer",
+                "--type",
+                "decision",
+            ],
+        ).output
+    )
+
+    found = runner.invoke(app, ["search", "Flask"])
+    assert found.exit_code == 0, found.output
+    assert memory_id in found.output
+    assert "decision" in found.output
+    assert "current version: 1" in found.output
+    assert "Uses Flask for the web layer" in found.output
+
+    missed = runner.invoke(app, ["search", "FastAPI"])
+    assert missed.exit_code == 0
+    assert "No matches." in missed.output
+
+    filtered = runner.invoke(app, ["search", "Flask", "--project-id", project_id])
+    assert filtered.exit_code == 0, filtered.output
+    assert memory_id in filtered.output
+
+    unknown_project = runner.invoke(app, ["search", "Flask", "--project-id", "unknown"])
+    assert unknown_project.exit_code == 0
+    assert "No matches." in unknown_project.output
+
+
+def test_search_command_invalid_query(project_dir: Path):
+    _init(project_dir)
+    result = runner.invoke(app, ["search", '"unterminated'])
+    assert result.exit_code == 1
+    assert "Invalid search query" in result.output
