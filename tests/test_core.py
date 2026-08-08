@@ -1,8 +1,14 @@
 import pytest
 from chronicle.core import (
     ChronicleEngine,
+    CrossProjectRelationshipError,
+    InvalidObservationActionError,
     MemoryNotFoundError,
+    ObservationAlreadyProcessedError,
+    ObservationNotFoundError,
     ProjectNotFoundError,
+    RelationshipNotFoundError,
+    SelfRelationshipError,
 )
 from chronicle.models import Base
 from sqlalchemy import create_engine
@@ -111,3 +117,306 @@ def test_list_memories_orders_by_creation(engine):
 
 def test_list_memories_unknown_project_is_empty(engine):
     assert engine.list_memories(project_id="missing") == []
+
+
+# ------------------------------------------------------------------
+# Observation tests
+# ------------------------------------------------------------------
+
+
+def test_create_observation(engine):
+    project = engine.create_project(name="demo")
+
+    observation = engine.create_observation(project_id=project.id, content="discovered something")
+
+    assert observation.project_id == project.id
+    assert observation.content == "discovered something"
+    assert observation.status == "pending"
+    assert observation.processed_at is None
+
+
+def test_create_observation_unknown_project_raises(engine):
+    with pytest.raises(ProjectNotFoundError):
+        engine.create_observation(project_id="missing", content="x")
+
+
+def test_list_observations_returns_ordered(engine):
+    project = engine.create_project(name="demo")
+    first = engine.create_observation(project_id=project.id, content="a")
+    second = engine.create_observation(project_id=project.id, content="b")
+
+    observations = engine.list_observations(project_id=project.id)
+
+    assert [o.id for o in observations] == [first.id, second.id]
+
+
+def test_list_observations_unknown_project_is_empty(engine):
+    assert engine.list_observations(project_id="missing") == []
+
+
+def test_process_observation_create_memory(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="new knowledge")
+
+    result = engine.process_observation(observation_id=observation.id, action="create_memory")
+
+    assert result.status == "processed"
+    assert result.processed_at is not None
+
+    memories = engine.list_memories(project_id=project.id)
+    assert len(memories) == 1
+    assert memories[0].versions[0].content == "new knowledge"
+
+
+def test_process_observation_update_memory(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="original")
+    observation = engine.create_observation(project_id=project.id, content="updated knowledge")
+
+    result = engine.process_observation(
+        observation_id=observation.id, action="update_memory", memory_id=memory.id
+    )
+
+    assert result.status == "processed"
+
+    fetched = engine.get_memory(memory.id)
+    assert len(fetched.versions) == 2
+    assert fetched.versions[1].content == "updated knowledge"
+
+
+def test_process_observation_update_requires_memory_id(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="x")
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.process_observation(observation_id=observation.id, action="update_memory")
+
+
+def test_process_observation_update_unknown_memory_raises(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="x")
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.process_observation(
+            observation_id=observation.id, action="update_memory", memory_id="missing"
+        )
+
+
+def test_process_observation_update_cross_project_raises(engine):
+    project_a = engine.create_project(name="a")
+    project_b = engine.create_project(name="b")
+    memory = engine.create_memory(project_id=project_a.id, content="original")
+    observation = engine.create_observation(project_id=project_b.id, content="x")
+
+    with pytest.raises(CrossProjectRelationshipError):
+        engine.process_observation(
+            observation_id=observation.id, action="update_memory", memory_id=memory.id
+        )
+
+
+def test_process_observation_discard(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="not useful")
+
+    result = engine.process_observation(observation_id=observation.id, action="discard")
+
+    assert result.status == "discarded"
+    assert result.processed_at is not None
+    assert engine.list_memories(project_id=project.id) == []
+
+
+def test_process_observation_invalid_action_raises(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="x")
+
+    with pytest.raises(InvalidObservationActionError):
+        engine.process_observation(observation_id=observation.id, action="invalid")
+
+
+def test_process_observation_already_processed_raises(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="x")
+
+    engine.process_observation(observation_id=observation.id, action="discard")
+
+    with pytest.raises(ObservationAlreadyProcessedError):
+        engine.process_observation(observation_id=observation.id, action="discard")
+
+
+def test_process_observation_unknown_observation_raises(engine):
+    with pytest.raises(ObservationNotFoundError):
+        engine.process_observation(observation_id="missing", action="discard")
+
+
+# ------------------------------------------------------------------
+# Relationship tests
+# ------------------------------------------------------------------
+
+
+def test_create_relationship(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+
+    rel = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+
+    assert rel.project_id == project.id
+    assert rel.from_memory_id == mem_a.id
+    assert rel.to_memory_id == mem_b.id
+    assert rel.type == "caused_by"
+
+
+def test_create_relationship_self_raises(engine):
+    project = engine.create_project(name="demo")
+    mem = engine.create_memory(project_id=project.id, content="a")
+
+    with pytest.raises(SelfRelationshipError):
+        engine.create_relationship(
+            project_id=project.id,
+            from_memory_id=mem.id,
+            to_memory_id=mem.id,
+            type="related_to",
+        )
+
+
+def test_create_relationship_unknown_project_raises(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+
+    with pytest.raises(ProjectNotFoundError):
+        engine.create_relationship(
+            project_id="missing",
+            from_memory_id=mem_a.id,
+            to_memory_id=mem_b.id,
+            type="related_to",
+        )
+
+
+def test_create_relationship_unknown_from_memory_raises(engine):
+    project = engine.create_project(name="demo")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.create_relationship(
+            project_id=project.id,
+            from_memory_id="missing",
+            to_memory_id=mem_b.id,
+            type="related_to",
+        )
+
+
+def test_create_relationship_unknown_to_memory_raises(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.create_relationship(
+            project_id=project.id,
+            from_memory_id=mem_a.id,
+            to_memory_id="missing",
+            type="related_to",
+        )
+
+
+def test_create_relationship_cross_project_raises(engine):
+    project_a = engine.create_project(name="a")
+    project_b = engine.create_project(name="b")
+    mem_a = engine.create_memory(project_id=project_a.id, content="a")
+    mem_b = engine.create_memory(project_id=project_b.id, content="b")
+
+    with pytest.raises(CrossProjectRelationshipError):
+        engine.create_relationship(
+            project_id=project_a.id,
+            from_memory_id=mem_a.id,
+            to_memory_id=mem_b.id,
+            type="related_to",
+        )
+
+
+def test_list_relationships_returns_ordered(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    mem_c = engine.create_memory(project_id=project.id, content="c")
+    first = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+    second = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_b.id,
+        to_memory_id=mem_c.id,
+        type="resolved_by",
+    )
+
+    relationships = engine.list_relationships(project_id=project.id)
+
+    assert [r.id for r in relationships] == [first.id, second.id]
+
+
+def test_list_relationships_unknown_project_is_empty(engine):
+    assert engine.list_relationships(project_id="missing") == []
+
+
+def test_get_relationships_for_memory(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    mem_c = engine.create_memory(project_id=project.id, content="c")
+    rel_ab = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+    rel_bc = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_b.id,
+        to_memory_id=mem_c.id,
+        type="resolved_by",
+    )
+
+    rels = engine.get_relationships_for_memory(memory_id=mem_b.id)
+
+    assert len(rels) == 2
+    rel_ids = {r.id for r in rels}
+    assert rel_ab.id in rel_ids
+    assert rel_bc.id in rel_ids
+
+
+def test_get_relationships_for_memory_no_matches(engine):
+    project = engine.create_project(name="demo")
+    mem = engine.create_memory(project_id=project.id, content="isolated")
+
+    rels = engine.get_relationships_for_memory(memory_id=mem.id)
+
+    assert rels == []
+
+
+def test_remove_relationship(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    rel = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="related_to",
+    )
+
+    engine.remove_relationship(relationship_id=rel.id)
+
+    assert engine.list_relationships(project_id=project.id) == []
+
+
+def test_remove_relationship_unknown_raises(engine):
+    with pytest.raises(RelationshipNotFoundError):
+        engine.remove_relationship(relationship_id="missing")

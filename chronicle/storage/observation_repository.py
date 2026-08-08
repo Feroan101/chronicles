@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import select
 
 from chronicle.models import Observation
@@ -20,3 +22,13 @@ class ObservationRepository(Repository):
                 .order_by(Observation.created_at, Observation.id)
             )
         )
+
+    def update_status(
+        self, observation_id: str, status: str, processed_at: datetime | None = None
+    ) -> Observation | None:
+        observation = self.get(observation_id)
+        if observation is None:
+            return None
+        observation.status = status
+        observation.processed_at = processed_at
+        return observation

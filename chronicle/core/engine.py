@@ -6,17 +6,25 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.core.errors import (
+    CrossProjectRelationshipError,
+    InvalidObservationActionError,
     MemoryNotFoundError,
+    ObservationAlreadyProcessedError,
+    ObservationNotFoundError,
     ProjectNotFoundError,
+    RelationshipNotFoundError,
     SearchQueryError,
+    SelfRelationshipError,
 )
 from chronicle.core.git import GitContext
-from chronicle.models import Evidence, Memory, MemoryVersion, Project
+from chronicle.models import Evidence, Memory, MemoryVersion, Observation, Project, Relationship
 from chronicle.storage import (
     EvidenceRepository,
     MemoryRepository,
     MemoryVersionRepository,
+    ObservationRepository,
     ProjectRepository,
+    RelationshipRepository,
 )
 from chronicle.utils.ids import new_uuid
 from chronicle.utils.time import utcnow
@@ -194,3 +202,155 @@ class ChronicleEngine:
                     continue
                 results.append(SearchResult(memory=memory, version=version, rank=rank))
             return results
+
+    # ------------------------------------------------------------------
+    # Observation operations
+    # ------------------------------------------------------------------
+
+    def create_observation(self, project_id: str, content: str) -> Observation:
+        """Create a pending Observation in a Project."""
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            observation = Observation(
+                id=new_uuid(),
+                project_id=project_id,
+                content=content,
+                status="pending",
+            )
+            return ObservationRepository(session).create(observation)
+
+    def list_observations(self, project_id: str) -> list[Observation]:
+        """List all Observations in a Project, ordered by creation."""
+        with self._transaction() as session:
+            return ObservationRepository(session).list_by_project(project_id)
+
+    def process_observation(
+        self,
+        observation_id: str,
+        action: str,
+        memory_id: str | None = None,
+    ) -> Observation:
+        """Process an Observation into persistent knowledge or discard it.
+
+        Actions:
+        - "create_memory": creates a new Memory from the observation content.
+        - "update_memory": appends a new Version to an existing Memory
+          (``memory_id`` is required).
+        - "discard": marks the Observation as discarded with no knowledge change.
+        """
+        valid_actions = {"create_memory", "update_memory", "discard"}
+        if action not in valid_actions:
+            raise InvalidObservationActionError(action)
+
+        with self._transaction() as session:
+            observation = ObservationRepository(session).get(observation_id)
+            if observation is None:
+                raise ObservationNotFoundError(observation_id)
+            if observation.status != "pending":
+                raise ObservationAlreadyProcessedError(observation_id, observation.status)
+
+            if action == "create_memory":
+                memory = Memory(
+                    id=new_uuid(),
+                    project_id=observation.project_id,
+                    type=None,
+                )
+                MemoryRepository(session).create(memory)
+                version = MemoryVersion(
+                    id=new_uuid(),
+                    memory_id=memory.id,
+                    sequence=1,
+                    content=observation.content,
+                    context=None,
+                )
+                MemoryVersionRepository(session).create(version)
+                session.flush()
+                _ = memory.versions
+
+            elif action == "update_memory":
+                if memory_id is None:
+                    raise MemoryNotFoundError("(none)")
+                memory = MemoryRepository(session).get(memory_id)
+                if memory is None:
+                    raise MemoryNotFoundError(memory_id)
+                if memory.project_id != observation.project_id:
+                    raise CrossProjectRelationshipError()
+                next_seq = MemoryVersionRepository(session).highest_sequence(memory_id) + 1
+                version = MemoryVersion(
+                    id=new_uuid(),
+                    memory_id=memory_id,
+                    sequence=next_seq,
+                    content=observation.content,
+                    context=None,
+                )
+                MemoryVersionRepository(session).create(version)
+
+            # action == "discard": no knowledge change
+
+            ObservationRepository(session).update_status(
+                observation_id,
+                "processed" if action != "discard" else "discarded",
+                processed_at=utcnow(),
+            )
+            return observation
+
+    # ------------------------------------------------------------------
+    # Relationship operations
+    # ------------------------------------------------------------------
+
+    def create_relationship(
+        self,
+        project_id: str,
+        from_memory_id: str,
+        to_memory_id: str,
+        type: str,
+    ) -> Relationship:
+        """Create a directed, typed Relationship between two Memories."""
+        if from_memory_id == to_memory_id:
+            raise SelfRelationshipError()
+
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+
+            from_memory = MemoryRepository(session).get(from_memory_id)
+            if from_memory is None:
+                raise MemoryNotFoundError(from_memory_id)
+            if from_memory.project_id != project_id:
+                raise CrossProjectRelationshipError()
+
+            to_memory = MemoryRepository(session).get(to_memory_id)
+            if to_memory is None:
+                raise MemoryNotFoundError(to_memory_id)
+            if to_memory.project_id != project_id:
+                raise CrossProjectRelationshipError()
+
+            relationship = Relationship(
+                id=new_uuid(),
+                project_id=project_id,
+                from_memory_id=from_memory_id,
+                to_memory_id=to_memory_id,
+                type=type,
+            )
+            return RelationshipRepository(session).create(relationship)
+
+    def list_relationships(self, project_id: str) -> list[Relationship]:
+        """List all Relationships in a Project, ordered by creation."""
+        with self._transaction() as session:
+            return RelationshipRepository(session).list_by_project(project_id)
+
+    def get_relationships_for_memory(self, memory_id: str) -> list[Relationship]:
+        """Get all Relationships where a Memory is source or target."""
+        with self._transaction() as session:
+            return RelationshipRepository(session).list_by_memory(memory_id)
+
+    def remove_relationship(self, relationship_id: str) -> None:
+        """Remove a Relationship.
+
+        This is a physical delete. Relationship history/versioning is a
+        deferred requirement (see GRAPH.md §8, §12).
+        """
+        with self._transaction() as session:
+            if not RelationshipRepository(session).delete(relationship_id):
+                raise RelationshipNotFoundError(relationship_id)

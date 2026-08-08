@@ -70,6 +70,13 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "create_version",
             "search",
             "get_evidence",
+            "create_observation",
+            "list_observations",
+            "process_observation",
+            "create_relationship",
+            "list_relationships",
+            "get_relationships_for_memory",
+            "remove_relationship",
         }
 
 
