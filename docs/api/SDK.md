@@ -132,16 +132,81 @@ The SDK should allow Chronicle to be embedded into different applications and ag
 
 ---
 
-## 7. Scope Boundaries
+## 7. Implementation
 
-This document defines the SDK interface concept.
+The SDK is implemented as the Python package `chronicle/sdk`, exposing a
+synchronous `Chronicle` client. It is a thin adapter over `ChronicleEngine`:
+every method delegates to Core, and the SDK contains no SQLAlchemy queries and
+no business logic.
+
+### Client
+
+```python
+from chronicle.sdk import Chronicle
+```
+
+The client is also re-exported from the top-level package for convenience:
+
+```python
+from chronicle import Chronicle
+```
+
+A `Chronicle` instance connects to a store that must already exist and be
+migrated. The SDK never creates or migrates the database automatically.
+
+```python
+Chronicle()  # .chronicle/chronicle.db (CWD-relative)
+Chronicle(db_path=".chronicle/chronicle.db")
+Chronicle(session_factory=sessionmaker(bind=engine))
+```
+
+`session_factory` wins over `db_path` when both are given. Each instance holds
+its own store connection; multiple connections may be open at once. All
+operations take an explicit `project_id` / `memory_id`; there is no active
+project state.
+
+### Methods
+
+The method set mirrors the Core, REST, and MCP operations:
+
+| Method | Description |
+| --- | --- |
+| `create_project(name, description=None)` | Create a project, returning `ProjectRead`. |
+| `get_project(project_id)` | Get a project by ID. Raises `ProjectNotFoundError` when missing. |
+| `create_memory(project_id, content, type=None, context=None)` | Store a memory with its initial version, returning `MemoryRead`. |
+| `get_memory(memory_id)` | Get a memory and its version history. Raises `MemoryNotFoundError` when missing. |
+| `list_memories(project_id)` | List a project's memories, ordered by creation, returning `list[MemoryRead]`. |
+| `update_memory(memory_id, type=UNSET)` | Update a memory's type, returning `MemoryRead`. |
+| `create_version(memory_id, content, context=None)` | Append a memory version, returning `MemoryVersionRead`. |
+| `search(query, project_id=None)` | Search project knowledge, returning `list[SearchHitRead]` of current versions. |
+
+Methods return the shared Pydantic read models (`ProjectRead`, `MemoryRead`,
+`MemoryVersionRead`, `SearchHitRead`) also used by the REST and MCP interfaces;
+SQLAlchemy ORM objects are never exposed.
+
+### update_memory semantics
+
+The `UNSET` sentinel (exported from `chronicle.sdk`) distinguishes "argument
+not provided" from an explicit null:
+
+* `update_memory(memory_id)` — `type` omitted (defaults to `UNSET`), type unchanged.
+* `update_memory(memory_id, type="decision")` — type set to `"decision"`.
+* `update_memory(memory_id, type=None)` — type cleared.
+
+### Errors
+
+SDK methods surface the Core domain errors directly: `ProjectNotFoundError`,
+`MemoryNotFoundError`, and `SearchQueryError` (all subclasses of
+`ChronicleError`). The SDK adds no error layer of its own.
+
+---
+
+## 8. Scope Boundaries
+
+This document defines the SDK interface concept and its implementation.
 
 It does not define:
 
-* Programming language implementation
-* SDK libraries
-* Package structure
-* Internal APIs
+* Agent architectures
+* Model behavior
 * Authentication systems
-
-Those details belong to future implementation decisions.
