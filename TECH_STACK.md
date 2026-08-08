@@ -98,18 +98,18 @@ It MUST be used for:
 
 # Database
 
-## PostgreSQL
+## SQLite
 
-PostgreSQL is the official database for Chronicle.
+SQLite is the storage engine for Chronicle Version 1.
 
 It provides:
 
+* Local-first operation
+* Zero configuration
 * Reliable persistence
-* ACID compliance
-* Strong relational capabilities
-* Production-ready performance
+* Full-text search (FTS5)
 
-SQLite MAY be used for local development or testing where appropriate.
+PostgreSQL may be used in future versions for multi-user or server deployments.
 
 ---
 
@@ -139,39 +139,6 @@ Alembic is the official migration tool.
 Database schema changes MUST be managed through migrations.
 
 Manual schema modifications SHOULD be avoided.
-
----
-
-# AI Framework
-
-## LangChain
-
-LangChain is the standard framework for AI integrations.
-
-LangChain MAY be used for:
-
-* LLM integrations
-* Prompt workflows
-* Model interaction
-* AI utilities
-
-The Chronicle Core MUST remain independent of LangChain.
-
----
-
-# Agent Orchestration
-
-## LangGraph
-
-LangGraph is the standard framework for agent orchestration.
-
-It MAY be used for:
-
-* Multi-step agent workflows
-* Agent state management
-* Agent coordination
-
-Chronicle Core MUST remain independent of LangGraph.
 
 ---
 
@@ -216,34 +183,6 @@ All code SHOULD pass Ruff checks before being committed.
 
 ---
 
-# Containerization
-
-## Docker
-
-Docker is the official containerization platform.
-
-Docker SHOULD be used for:
-
-* Development environments
-* Local deployments
-* Production deployments
-
----
-
-# Continuous Integration
-
-## GitHub Actions
-
-GitHub Actions is the official CI platform.
-
-Continuous Integration SHOULD include:
-
-* Linting
-* Testing
-* Build verification
-
----
-
 # Architecture Principles
 
 Technology choices MUST support the following architecture.
@@ -265,7 +204,7 @@ Storage Layer
 
 ↓
 
-PostgreSQL
+SQLite
 
 The Chronicle Core is the heart of the system.
 
@@ -313,15 +252,11 @@ Technology choices MUST prioritize simplicity over novelty.
 | CLI                    | Typer          |
 | REST API               | FastAPI        |
 | Data Validation        | Pydantic v2    |
-| Database               | PostgreSQL     |
+| Database               | SQLite         |
 | ORM                    | SQLAlchemy 2   |
 | Database Migrations    | Alembic        |
-| AI Framework           | LangChain      |
-| Agent Orchestration    | LangGraph      |
 | AI Communication       | MCP            |
 | Testing                | pytest         |
 | Linting & Formatting   | Ruff           |
-| Containerization       | Docker         |
-| Continuous Integration | GitHub Actions |
 
 This document serves as the authoritative reference for Chronicle's implementation stack.

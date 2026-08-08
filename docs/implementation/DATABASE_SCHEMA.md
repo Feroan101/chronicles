@@ -9,12 +9,11 @@ The schema implements the object model defined by the Chronicle specifications:
 * Project
 * Memory
 * Memory Version
-* Snapshot
+* Evidence
 * Relationship
 * Observation
-* Evidence
 * Confidence
-* Branch
+* Configuration
 
 The schema preserves every invariant defined by the specifications. In particular:
 
@@ -24,7 +23,7 @@ The schema preserves every invariant defined by the specifications. In particula
 * Every Version belongs to exactly one Memory.
 * Versions are immutable after creation.
 * Every Memory has exactly one Current Version.
-* Snapshots are immutable after creation.
+* Evidence is immutable after insertion.
 * Relationships never cross Project boundaries.
 * Observations never modify stored knowledge directly.
 
@@ -53,7 +52,23 @@ The schema does not rely on machine-specific paths, absolute filesystem location
 
 ## 4. Tables
 
-### 4.1 projects
+### 4.1 config
+
+Stores Chronicle store-level configuration.
+
+| Column    | Type      | Constraints            | Description                    |
+|-----------|-----------|------------------------|--------------------------------|
+| key       | TEXT      | PRIMARY KEY            | Configuration key.             |
+| value     | TEXT      | NOT NULL               | Configuration value.           |
+
+Example keys:
+
+* `schema_version` — current schema version for migrations.
+* `current_branch` — the active branch name.
+
+---
+
+### 4.2 projects
 
 Stores Project objects. A Project is the ownership boundary for all knowledge.
 
@@ -71,7 +86,7 @@ Constraints:
 
 ---
 
-### 4.2 memories
+### 4.3 memories
 
 Stores Memory objects. A Memory is a unit of reusable project knowledge.
 
@@ -90,7 +105,7 @@ Constraints:
 
 ---
 
-### 4.3 memory_versions
+### 4.4 memory_versions
 
 Stores Memory Version objects. Versions are immutable historical states of a Memory.
 
@@ -115,43 +130,25 @@ Constraints:
 
 ---
 
-### 4.4 snapshots
+### 4.5 observations
 
-Stores Snapshot objects. Snapshots are immutable captures of Project knowledge state.
+Stores unprocessed Observations before they are incorporated into project knowledge.
 
-| Column        | Type      | Constraints            | Description                              |
-|---------------|-----------|------------------------|------------------------------------------|
-| id            | TEXT      | PRIMARY KEY            | Snapshot identity (UUID).                |
-| project_id    | TEXT      | NOT NULL, FK projects  | Owning Project.                          |
-| parent_id     | TEXT      | FK snapshots           | Parent snapshot (single-parent history). |
-| message       | TEXT      |                        | Snapshot message.                        |
-| created_at    | TIMESTAMP | NOT NULL               | Creation time (UTC).                     |
-
-Constraints:
-
-* A Snapshot belongs to exactly one Project.
-* A Snapshot represents one point in time.
-* A Snapshot is immutable; its rows are never modified.
-* A Snapshot does not contain source code.
-* Snapshot history forms a chain through `parent_id`.
-
----
-
-### 4.5 snapshot_members
-
-Captures the knowledge state recorded by each Snapshot.
-
-| Column             | Type      | Constraints                | Description                      |
-|--------------------|-----------|----------------------------|----------------------------------|
-| snapshot_id        | TEXT      | NOT NULL, FK snapshots     | Owning Snapshot.                 |
-| memory_version_id  | TEXT      | NOT NULL, FK memory_versions | Version captured by Snapshot.  |
+| Column         | Type      | Constraints              | Description                       |
+|----------------|-----------|--------------------------|-----------------------------------|
+| id             | TEXT      | PRIMARY KEY              | Observation identity (UUID).      |
+| project_id     | TEXT      | NOT NULL, FK projects    | Owning Project.                   |
+| content        | TEXT      | NOT NULL                 | The observed information.         |
+| status         | TEXT      | NOT NULL                 | pending, processed, discarded.    |
+| created_at     | TIMESTAMP | NOT NULL                 | Creation time (UTC).              |
+| processed_at   | TIMESTAMP |                          | Processing time (UTC).            |
 
 Constraints:
 
-* `PRIMARY KEY (snapshot_id, memory_version_id)`.
-* A Snapshot captures each Memory through its Current Version at creation time.
-* A Snapshot captures only one Version per Memory.
-* Changes made after a Snapshot is created never modify existing `snapshot_members` rows.
+* An Observation belongs to exactly one Project.
+* An Observation never modifies stored knowledge directly.
+* Knowledge changes only through Memory creation or Version creation.
+* `CHECK (status IN ('pending', 'processed', 'discarded'))`.
 
 ---
 
@@ -174,75 +171,10 @@ Constraints:
 * `CHECK (from_memory_id <> to_memory_id)` — a Relationship never connects a Memory to itself.
 * A Relationship never transfers Memory ownership.
 * A Relationship never modifies the Memories it connects.
-* Relationship changes MUST NOT modify existing Snapshots.
 
 ---
 
-### 4.7 snapshot_relationships
-
-Captures the relationships present in each Snapshot.
-
-| Column             | Type      | Constraints                | Description                     |
-|--------------------|-----------|----------------------------|---------------------------------|
-| snapshot_id        | TEXT      | NOT NULL, FK snapshots     | Owning Snapshot.                |
-| relationship_id    | TEXT      | NOT NULL, FK relationships | Relationship captured.          |
-| from_memory_id     | TEXT      | NOT NULL                   | Source Memory at capture time.  |
-| to_memory_id       | TEXT      | NOT NULL                   | Target Memory at capture time.  |
-| type               | TEXT      | NOT NULL                   | Type at capture time.           |
-
-Constraints:
-
-* `PRIMARY KEY (snapshot_id, relationship_id)`.
-* Captures the state of each relationship exactly as it existed at creation time.
-* Snapshots therefore preserve relationship history without rewriting past states.
-
----
-
-### 4.8 branches
-
-Stores branch references. A branch is a named pointer to a Snapshot.
-
-| Column            | Type      | Constraints                | Description                    |
-|-------------------|-----------|----------------------------|--------------------------------|
-| project_id        | TEXT      | NOT NULL, FK projects      | Owning Project.                |
-| name              | TEXT      | NOT NULL                   | Branch name.                   |
-| head_snapshot_id  | TEXT      | NOT NULL, FK snapshots     | Snapshot the branch points at. |
-| created_at        | TIMESTAMP | NOT NULL                   | Creation time (UTC).           |
-| updated_at        | TIMESTAMP | NOT NULL                   | Last move time (UTC).          |
-
-Constraints:
-
-* `PRIMARY KEY (project_id, name)` — a branch name is unique within a Project.
-* A branch points at a single Snapshot (its head).
-* Branch state is derived from the head Snapshot and its history.
-
----
-
-### 4.9 evidence
-
-Stores Evidence records attached to Memory Versions.
-
-| Column            | Type      | Constraints                | Description                           |
-|-------------------|-----------|----------------------------|---------------------------------------|
-| id                | TEXT      | PRIMARY KEY                | Evidence identity (UUID).             |
-| memory_version_id | TEXT      | NOT NULL, FK memory_versions | Version this evidence supports.     |
-| evidence_type     | TEXT      | NOT NULL                   | commit, branch, description, pull_request, documentation, source_code, human_confirmation, ai_observation. |
-| ref               | TEXT      | NOT NULL                   | Reference to the evidence (commit SHA, file path, etc.). |
-| recorded_at       | TIMESTAMP | NOT NULL                   | When the evidence was recorded (UTC). |
-
-The `branch` and `description` values record the fields of a Git context
-reference (see the Git Integration Specification). The column is unconstrained
-`TEXT`; the values above are the documented set.
-
-Constraints:
-
-* Evidence is immutable after insertion.
-* Evidence attaches to a specific Memory Version and never moves.
-* Evidence never changes Memory ownership.
-
----
-
-### 4.10 confidence_history
+### 4.7 confidence_history
 
 Stores confidence scores as an append-only time series.
 
@@ -263,42 +195,23 @@ Constraints:
 
 ---
 
-### 4.11 observations
+### 4.8 evidence
 
-Stores unprocessed Observations before they are incorporated into project knowledge.
+Stores Evidence records attached to Memory Versions.
 
-| Column         | Type      | Constraints              | Description                       |
-|----------------|-----------|--------------------------|-----------------------------------|
-| id             | TEXT      | PRIMARY KEY              | Observation identity (UUID).      |
-| project_id     | TEXT      | NOT NULL, FK projects    | Owning Project.                   |
-| content        | TEXT      | NOT NULL                 | The observed information.         |
-| status         | TEXT      | NOT NULL                 | pending, processed, discarded.    |
-| created_at     | TIMESTAMP | NOT NULL                 | Creation time (UTC).              |
-| processed_at   | TIMESTAMP |                          | Processing time (UTC).            |
+| Column            | Type      | Constraints                | Description                           |
+|-------------------|-----------|----------------------------|---------------------------------------|
+| id                | TEXT      | PRIMARY KEY                | Evidence identity (UUID).             |
+| memory_version_id | TEXT      | NOT NULL, FK memory_versions | Version this evidence supports.     |
+| evidence_type     | TEXT      | NOT NULL                   | commit, branch, description, pull_request, documentation, source_code, human_confirmation, ai_observation. |
+| ref               | TEXT      | NOT NULL                   | Reference to the evidence (commit SHA, file path, etc.). |
+| recorded_at       | TIMESTAMP | NOT NULL                   | When the evidence was recorded (UTC). |
 
 Constraints:
 
-* An Observation belongs to exactly one Project.
-* An Observation never modifies stored knowledge directly.
-* Knowledge changes only through Memory creation or Version creation.
-* Processed Observations MAY be discarded by the implementation.
-* Persistence of Observations is temporary; persistent knowledge begins only after incorporation into the Memory model.
-
----
-
-### 4.12 config
-
-Stores Chronicle store-level configuration.
-
-| Column    | Type      | Constraints            | Description                    |
-|-----------|-----------|------------------------|--------------------------------|
-| key       | TEXT      | PRIMARY KEY            | Configuration key.             |
-| value     | TEXT      | NOT NULL               | Configuration value.           |
-
-Example keys:
-
-* `schema_version` — current schema version for migrations.
-* `current_branch` — the active branch name.
+* Evidence is immutable after insertion.
+* Evidence attaches to a specific Memory Version and never moves.
+* Evidence never changes Memory ownership.
 
 ---
 
@@ -306,7 +219,28 @@ Example keys:
 
 Knowledge search requires an index over Memory Version content.
 
-In the SQLite implementation, search is provided through a full-text search virtual table over `memory_versions(content)`.
+In the SQLite implementation, search is provided through a full-text search virtual table:
+
+```sql
+CREATE VIRTUAL TABLE search_index USING fts5(
+    memory_id UNINDEXED,
+    memory_version_id UNINDEXED,
+    content
+)
+```
+
+The `content` column is full-text indexed. The two ID columns are stored but not indexed (UNINDEXED), used only for associating search results back to their owning objects.
+
+A trigger keeps the search index synchronized with the `memory_versions` table:
+
+```sql
+CREATE TRIGGER trg_search_index_insert
+AFTER INSERT ON memory_versions
+BEGIN
+    INSERT INTO search_index (memory_id, memory_version_id, content)
+    VALUES (NEW.memory_id, NEW.id, NEW.content);
+END
+```
 
 The search index is derived data. It MUST be kept consistent with the `memory_versions` table and MUST be maintained whenever a new Version is created.
 

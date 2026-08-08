@@ -55,18 +55,11 @@ The following capabilities define the scope of Version 1.
 
 * Local-first operation
 * Repository-scoped knowledge
-* Immutable knowledge snapshots
+* Immutable knowledge versions
 * Structured knowledge objects
-* Knowledge graph
 * Evidence tracking
-* Confidence scoring
-* Verification
-* Drift detection
-* Memory decay
-* Branch-aware knowledge
-* Snapshot history
-* Knowledge search
-* Git integration
+* Git context integration
+* Knowledge search (FTS5)
 * CLI
 * REST API
 * Python SDK
@@ -89,6 +82,13 @@ The following features are intentionally outside the scope of Version 1.
 * Automatic snapshot acceptance
 * Automatic conflict resolution
 * Distributed deployments
+* Knowledge graph (relationships)
+* Snapshots
+* Branch tracking
+* Confidence scoring
+* Verification
+* Drift detection
+* Automatic Git integration
 
 These features may be considered in future versions but are not part of the Version 1 design.
 
