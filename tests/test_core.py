@@ -111,3 +111,108 @@ def test_list_memories_orders_by_creation(engine):
 
 def test_list_memories_unknown_project_is_empty(engine):
     assert engine.list_memories(project_id="missing") == []
+
+
+# ------------------------------------------------------------------
+# Snapshot tests
+# ------------------------------------------------------------------
+
+
+def test_create_snapshot(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    snapshot = engine.create_snapshot(project_id=project.id, message="initial state")
+
+    assert snapshot.project_id == project.id
+    assert snapshot.message == "initial state"
+    assert len(snapshot.members) == 1
+    assert snapshot.members[0].memory_version_id == memory.versions[0].id
+    assert len(snapshot.snapshot_relationships) == 0
+
+
+def test_create_snapshot_unknown_project_raises(engine):
+    with pytest.raises(ProjectNotFoundError):
+        engine.create_snapshot(project_id="missing")
+
+
+def test_create_snapshot_captures_current_versions(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="v1")
+    version2 = engine.create_version(memory_id=memory.id, content="v2")
+
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    assert len(snapshot.members) == 1
+    assert snapshot.members[0].memory_version_id == version2.id
+
+
+def test_create_snapshot_captures_relationships(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    rel = engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    assert len(snapshot.snapshot_relationships) == 1
+    assert snapshot.snapshot_relationships[0].relationship_id == rel.id
+    assert snapshot.snapshot_relationships[0].from_memory_id == mem_a.id
+    assert snapshot.snapshot_relationships[0].to_memory_id == mem_b.id
+    assert snapshot.snapshot_relationships[0].type == "caused_by"
+
+
+def test_create_snapshot_empty_project(engine):
+    project = engine.create_project(name="empty")
+
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    assert snapshot.project_id == project.id
+    assert len(snapshot.members) == 0
+    assert len(snapshot.snapshot_relationships) == 0
+
+
+def test_get_snapshot(engine):
+    project = engine.create_project(name="demo")
+    created = engine.create_snapshot(project_id=project.id, message="test")
+
+    fetched = engine.get_snapshot(created.id)
+
+    assert fetched is not None
+    assert fetched.id == created.id
+    assert fetched.message == "test"
+
+
+def test_get_snapshot_unknown_returns_none(engine):
+    assert engine.get_snapshot("missing") is None
+
+
+def test_list_snapshots_returns_ordered(engine):
+    project = engine.create_project(name="demo")
+    first = engine.create_snapshot(project_id=project.id, message="first")
+    second = engine.create_snapshot(project_id=project.id, message="second")
+
+    snapshots = engine.list_snapshots(project_id=project.id)
+
+    assert [s.id for s in snapshots] == [first.id, second.id]
+
+
+def test_list_snapshots_unknown_project_is_empty(engine):
+    assert engine.list_snapshots(project_id="missing") == []
+
+
+def test_snapshot_is_immutable(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="v1")
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    engine.create_version(memory_id=memory.id, content="v2")
+
+    fetched = engine.get_snapshot(snapshot.id)
+    assert len(fetched.members) == 1
+    assert fetched.members[0].memory_version_id == memory.versions[0].id

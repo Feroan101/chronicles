@@ -70,6 +70,9 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "create_version",
             "search",
             "get_evidence",
+            "create_snapshot",
+            "get_snapshot",
+            "list_snapshots",
         }
 
 
@@ -334,3 +337,78 @@ async def test_missing_required_argument_errors(server_dir):
     async with _session(server_dir) as session:
         result = await session.call_tool("create_project", {})
         assert result.isError
+
+
+@pytest.mark.anyio
+async def test_create_snapshot(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+
+        snapshot = await _ok(
+            session,
+            "create_snapshot",
+            {"project_id": project["id"], "message": "initial state"},
+        )
+
+        assert snapshot["project_id"] == project["id"]
+        assert snapshot["message"] == "initial state"
+        assert len(snapshot["members"]) == 1
+        assert snapshot["members"][0]["memory_version_id"] == memory["versions"][0]["id"]
+
+
+@pytest.mark.anyio
+async def test_get_snapshot(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        created = await _ok(
+            session, "create_snapshot", {"project_id": project["id"], "message": "test"}
+        )
+
+        fetched = await _ok(session, "get_snapshot", {"snapshot_id": created["id"]})
+
+        assert fetched["id"] == created["id"]
+        assert fetched["message"] == "test"
+
+
+@pytest.mark.anyio
+async def test_get_snapshot_unknown_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "get_snapshot", {"snapshot_id": "missing"})
+        assert "Snapshot not found: missing" in message
+
+
+@pytest.mark.anyio
+async def test_list_snapshots(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        first = await _ok(
+            session, "create_snapshot", {"project_id": project["id"], "message": "first"}
+        )
+        second = await _ok(
+            session, "create_snapshot", {"project_id": project["id"], "message": "second"}
+        )
+
+        snapshots = await _ok_list(session, "list_snapshots", {"project_id": project["id"]})
+
+        assert [s["id"] for s in snapshots] == [first["id"], second["id"]]
+
+
+@pytest.mark.anyio
+async def test_snapshot_immutable_after_creation(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(session, "create_memory", {"project_id": project["id"], "content": "v1"})
+        snapshot = await _ok(session, "create_snapshot", {"project_id": project["id"]})
+
+        await _ok(
+            session,
+            "create_version",
+            {"memory_id": memory["id"], "content": "v2"},
+        )
+
+        fetched = await _ok(session, "get_snapshot", {"snapshot_id": snapshot["id"]})
+        assert len(fetched["members"]) == 1
+        assert fetched["members"][0]["memory_version_id"] == memory["versions"][0]["id"]

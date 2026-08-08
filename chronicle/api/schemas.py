@@ -92,3 +92,53 @@ class SearchHitRead(BaseModel):
     memory: MemorySummaryRead
     version: MemoryVersionRead
     rank: float
+
+
+class RelationshipCreate(BaseModel):
+    from_memory_id: str
+    to_memory_id: str
+    type: str
+
+
+class RelationshipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    from_memory_id: str
+    to_memory_id: str
+    type: str
+    created_at: datetime
+
+
+class SnapshotCreate(BaseModel):
+    message: str | None = None
+
+
+class SnapshotMemberRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    snapshot_id: str
+    memory_version_id: str
+
+
+class SnapshotRelationshipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    snapshot_id: str
+    relationship_id: str
+    from_memory_id: str
+    to_memory_id: str
+    type: str
+
+
+class SnapshotRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    parent_id: str | None
+    message: str | None
+    created_at: datetime
+    members: list[SnapshotMemberRead]
+    snapshot_relationships: list[SnapshotRelationshipRead]

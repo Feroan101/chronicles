@@ -50,6 +50,9 @@ def test_application_startup_serves_docs_and_schema(client):
         "/memories/{memory_id}/versions",
         "/memories/{memory_id}/versions/{sequence}/evidence",
         "/search",
+        "/projects/{project_id}/relationships",
+        "/projects/{project_id}/snapshots",
+        "/snapshots/{snapshot_id}",
     }
 
 
@@ -242,3 +245,119 @@ def test_error_responses_are_fastapi_native(client):
     response = client.get("/search", params={"query": ""})
     assert response.status_code == 400
     assert set(response.json()) == {"detail"}
+
+
+# ------------------------------------------------------------------
+# Snapshot API tests
+# ------------------------------------------------------------------
+
+
+def test_create_snapshot(client, project_id):
+    response = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "initial state"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["project_id"] == project_id
+    assert body["message"] == "initial state"
+    assert body["id"]
+    assert body["created_at"]
+    assert body["members"] == []
+    assert body["snapshot_relationships"] == []
+
+
+def test_create_snapshot_captures_versions(client, project_id):
+    memory = _create_memory(client, project_id, "v1").json()
+
+    response = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "snapshot"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["members"]) == 1
+    assert body["members"][0]["memory_version_id"] == memory["versions"][0]["id"]
+
+
+def test_create_snapshot_captures_relationships(client, project_id):
+    mem_a = _create_memory(client, project_id, "a").json()
+    mem_b = _create_memory(client, project_id, "b").json()
+    client.post(
+        f"/projects/{project_id}/relationships",
+        json={
+            "from_memory_id": mem_a["id"],
+            "to_memory_id": mem_b["id"],
+            "type": "caused_by",
+        },
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "with relationships"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["snapshot_relationships"]) == 1
+    assert body["snapshot_relationships"][0]["type"] == "caused_by"
+
+
+def test_create_snapshot_unknown_project_returns_404(client):
+    response = client.post(
+        "/projects/missing/snapshots",
+        json={"message": "x"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found: missing"}
+
+
+def test_list_snapshots(client, project_id):
+    first = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "first"},
+    ).json()["id"]
+    second = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "second"},
+    ).json()["id"]
+
+    response = client.get(f"/projects/{project_id}/snapshots")
+    assert response.status_code == 200
+    assert [s["id"] for s in response.json()] == [first, second]
+
+
+def test_get_snapshot(client, project_id):
+    snapshot_id = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "test"},
+    ).json()["id"]
+
+    response = client.get(f"/snapshots/{snapshot_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == snapshot_id
+    assert body["message"] == "test"
+
+
+def test_get_snapshot_unknown_returns_404(client):
+    response = client.get("/snapshots/missing")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Snapshot not found: missing"}
+
+
+def test_snapshot_immutable_after_creation(client, project_id):
+    memory = _create_memory(client, project_id, "v1").json()
+    snapshot_id = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "before update"},
+    ).json()["id"]
+
+    client.post(
+        f"/memories/{memory['id']}/versions",
+        json={"content": "v2"},
+    )
+
+    response = client.get(f"/snapshots/{snapshot_id}")
+    body = response.json()
+    assert len(body["members"]) == 1
+    assert body["members"][0]["memory_version_id"] == memory["versions"][0]["id"]

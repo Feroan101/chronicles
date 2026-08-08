@@ -5,6 +5,8 @@ from chronicle.core.errors import (
     MemoryNotFoundError,
     ProjectNotFoundError,
     SearchQueryError,
+    SelfRelationshipError,
+    SnapshotNotFoundError,
 )
 from chronicle.core.git import GitContext
 
@@ -17,4 +19,6 @@ __all__ = [
     "ProjectNotFoundError",
     "SearchQueryError",
     "SearchResult",
+    "SelfRelationshipError",
+    "SnapshotNotFoundError",
 ]

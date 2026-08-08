@@ -27,6 +27,7 @@ from chronicle.api.schemas import (
     MemoryVersionRead,
     ProjectRead,
     SearchHitRead,
+    SnapshotRead,
 )
 from chronicle.core import (
     ChronicleEngine,
@@ -36,6 +37,7 @@ from chronicle.core import (
     MemoryNotFoundError,
     ProjectNotFoundError,
     SearchQueryError,
+    SnapshotNotFoundError,
 )
 
 DEFAULT_DB_PATH = Path(".chronicle") / "chronicle.db"
@@ -78,6 +80,10 @@ def _search_hit(result) -> SearchHitRead:
         version=MemoryVersionRead.model_validate(result.version),
         rank=result.rank,
     )
+
+
+def _snapshot(snapshot) -> SnapshotRead:
+    return SnapshotRead.model_validate(snapshot)
 
 
 class Chronicle:
@@ -205,6 +211,24 @@ class Chronicle:
             for result in self._engine.search(query=query, project_id=project_id)
         ]
 
+    def create_snapshot(self, project_id: str, message: str | None = None) -> SnapshotRead:
+        """Create a snapshot of the project's current knowledge state."""
+        return _snapshot(self._engine.create_snapshot(project_id=project_id, message=message))
+
+    def get_snapshot(self, snapshot_id: str) -> SnapshotRead:
+        """Get a snapshot by ID.
+
+        Raises ``SnapshotNotFoundError`` if no such snapshot exists.
+        """
+        snapshot = self._engine.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise SnapshotNotFoundError(snapshot_id)
+        return _snapshot(snapshot)
+
+    def list_snapshots(self, project_id: str) -> list[SnapshotRead]:
+        """List all snapshots for a project."""
+        return [_snapshot(snapshot) for snapshot in self._engine.list_snapshots(project_id)]
+
 
 __all__ = [
     "Chronicle",
@@ -215,10 +239,12 @@ __all__ = [
     "MemoryNotFoundError",
     "ProjectNotFoundError",
     "SearchQueryError",
+    "SnapshotNotFoundError",
     "EvidenceRead",
     "MemoryRead",
     "MemorySummaryRead",
     "MemoryVersionRead",
     "ProjectRead",
     "SearchHitRead",
+    "SnapshotRead",
 ]

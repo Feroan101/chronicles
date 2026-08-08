@@ -14,6 +14,18 @@ class MemoryNotFoundError(ChronicleError):
         self.memory_id = memory_id
 
 
+class SnapshotNotFoundError(ChronicleError):
+    def __init__(self, snapshot_id: str) -> None:
+        super().__init__(f"Snapshot not found: {snapshot_id}")
+        self.snapshot_id = snapshot_id
+
+
+class SelfRelationshipError(ChronicleError):
+    def __init__(self, memory_id: str) -> None:
+        super().__init__(f"A Relationship cannot connect a Memory to itself: {memory_id}")
+        self.memory_id = memory_id
+
+
 class SearchQueryError(ChronicleError):
     def __init__(self, query: str, detail: str | None = None) -> None:
         if detail is not None:
