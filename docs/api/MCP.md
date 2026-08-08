@@ -141,16 +141,70 @@ Agent sessions should not determine whether knowledge is available.
 
 ---
 
-## 8. Scope Boundaries
+## 8. Implementation
 
-This document defines the MCP interface concept.
+The MCP interface is implemented as an MCP server in `chronicle/mcp/server.py`
+using the official Python MCP SDK (`mcp>=1.0,<2.0`). The server is a thin
+adapter over `ChronicleEngine`: tool handlers never touch SQLAlchemy directly,
+they delegate exclusively to Core business operations.
+
+### Transport
+
+The server runs over `stdio` (`mcp run`, the default `FastMCP` transport). It
+is launched as a subprocess by the agent:
+
+```json
+{
+  "mcpServers": {
+    "chronicle": {
+      "command": "chronicle-mcp"
+    }
+  }
+}
+```
+
+The entry point `chronicle-mcp` is registered as a console script and runs the
+module-level server over stdio. The server opens the same default store as the
+CLI and REST interfaces (`.chronicle/chronicle.db` relative to the working
+directory), and can be constructed programmatically with
+`create_mcp_server(session_factory=None)` for custom stores.
+
+### Tools
+
+The tool set mirrors the Chronicle REST API:
+
+| Tool | Description |
+| --- | --- |
+| `create_project` | Create a new project (`name`, optional `description`). |
+| `get_project` | Get a project by ID. |
+| `create_memory` | Store a memory in a project (`project_id`, `content`, optional `type`, `context`). Creates the initial version. |
+| `get_memory` | Get a memory and its version history by ID. |
+| `list_memories` | List all memories in a project, ordered by creation. |
+| `update_memory` | Update a memory's `type`. Passing null or omitting `type` leaves the memory unchanged. |
+| `create_version` | Append a new version of a memory (`memory_id`, `content`, optional `context`). |
+| `search` | Search project knowledge (`query`, optional `project_id` filter). Returns current-version hits with rank. |
+
+Tool outputs are the same JSON shapes as the REST API responses. Errors from
+Core (e.g. `ProjectNotFoundError`, `MemoryNotFoundError`, `SearchQueryError`)
+surface as MCP tool errors (`isError` results) carrying the domain message.
+
+### Design Principles
+
+The MCP layer follows the same principles as the REST interface:
+
+- Agents communicate with Chronicle through a consistent, documented tool set.
+- Agents interact with Chronicle without depending on internal storage details.
+- Multiple agents can access the same project memory through a shared store.
+- Agent sessions do not determine whether knowledge is available.
+
+---
+
+## 9. Scope Boundaries
+
+This document defines the MCP interface concept and its implementation.
 
 It does not define:
 
-* MCP server implementation
-* Specific MCP tool definitions
 * Agent architectures
 * Model behavior
 * External integrations
-
-Those details belong to future implementation decisions.
