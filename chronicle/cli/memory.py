@@ -16,6 +16,9 @@ def create(
     git_branch: str | None = typer.Option(None, help="Git branch name."),
     git_commit: str | None = typer.Option(None, help="Git commit hash."),
     git_description: str | None = typer.Option(None, help="Git change description."),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Chronicle branch id. Defaults to the project's current branch."
+    ),
 ) -> None:
     git_ctx = None
     if any([git_branch, git_commit, git_description]):
@@ -23,7 +26,12 @@ def create(
 
         git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
     memory = ctx.engine().create_memory(
-        project_id=project_id, content=content, type=type, context=context, git_context=git_ctx
+        project_id=project_id,
+        content=content,
+        type=type,
+        context=context,
+        git_context=git_ctx,
+        branch_id=branch,
     )
     current = memory.versions[-1]
     typer.echo(f"Created memory {memory.id}")
@@ -36,8 +44,11 @@ def create(
 @command_errors
 def list_memories(
     project_id: str = typer.Option(..., help="Project id to list memories for."),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Chronicle branch id. Defaults to the project's current branch."
+    ),
 ) -> None:
-    memories = ctx.engine().list_memories(project_id=project_id)
+    memories = ctx.engine().list_memories(project_id=project_id, branch_id=branch)
     if not memories:
         typer.echo("No memories.")
         return

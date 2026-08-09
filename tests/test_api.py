@@ -45,6 +45,10 @@ def test_application_startup_serves_docs_and_schema(client):
     assert set(paths) == {
         "/projects",
         "/projects/{project_id}",
+        "/projects/{project_id}/branches",
+        "/branches/{branch_id}",
+        "/projects/{project_id}/branches/current",
+        "/branches/{branch_id}/knowledge",
         "/memories",
         "/memories/{memory_id}",
         "/projects/{project_id}/memories",
@@ -987,3 +991,100 @@ def test_assess_decay_read_only(client, project_id):
     assert fetched["versions"][0]["content"] == "knowledge"
     confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence").json()
     assert confidence["score"] == 0.7
+
+
+# ----------------------------------------------------------------------
+# Branch endpoints
+# ----------------------------------------------------------------------
+
+
+def test_create_and_list_branches(client, project_id):
+    branches = client.get(f"/projects/{project_id}/branches").json()
+    assert len(branches) == 1
+    assert branches[0]["is_default"] is True
+
+    response = client.post(
+        f"/projects/{project_id}/branches", json={"name": "experimental"}
+    )
+    assert response.status_code == 201
+    branch = response.json()
+    assert branch["name"] == "experimental"
+    assert branch["is_default"] is False
+
+    names = {b["name"] for b in client.get(f"/projects/{project_id}/branches").json()}
+    assert names == {"main", "experimental"}
+
+
+def test_create_branch_duplicate_name_returns_409(client, project_id):
+    client.post(f"/projects/{project_id}/branches", json={"name": "experimental"})
+    response = client.post(
+        f"/projects/{project_id}/branches", json={"name": "experimental"}
+    )
+    assert response.status_code == 409
+
+
+def test_get_and_switch_current_branch(client, project_id):
+    current = client.get(f"/projects/{project_id}/branches/current")
+    assert current.status_code == 200
+    assert current.json()["is_default"] is True
+
+    client.post(f"/projects/{project_id}/branches", json={"name": "feature"})
+    switched = client.post(f"/projects/{project_id}/branches/current", json={"name": "feature"})
+    assert switched.status_code == 200
+    assert switched.json()["name"] == "feature"
+
+    new_current = client.get(f"/projects/{project_id}/branches/current").json()
+    assert new_current["name"] == "feature"
+
+
+def test_switch_branch_unknown_name_returns_404(client, project_id):
+    response = client.post(f"/projects/{project_id}/branches/current", json={"name": "missing"})
+    assert response.status_code == 404
+
+
+def test_get_branch_knowledge_is_branch_scoped(client, project_id):
+    main = client.get(f"/projects/{project_id}/branches/current").json()
+    client.post(f"/projects/{project_id}/branches", json={"name": "feature"})
+    client.post(f"/projects/{project_id}/branches/current", json={"name": "feature"})
+
+    _create_memory(client, project_id, "only on feature")
+
+    feature = client.get(f"/projects/{project_id}/branches/current").json()
+    knowledge = client.get(f"/branches/{feature['id']}/knowledge").json()
+    assert [item["version"]["content"] for item in knowledge] == ["only on feature"]
+
+    main_knowledge = client.get(f"/branches/{main['id']}/knowledge").json()
+    assert main_knowledge == []
+
+
+def test_get_branch_by_id(client, project_id):
+    branch = client.get(f"/projects/{project_id}/branches/current").json()
+    response = client.get(f"/branches/{branch['id']}")
+    assert response.status_code == 200
+    assert response.json()["id"] == branch["id"]
+
+    assert client.get("/branches/missing").status_code == 404
+
+
+def test_create_snapshot_with_branch(client, project_id):
+    _create_memory(client, project_id, "on main")
+    main = client.get(f"/projects/{project_id}/branches/current").json()
+
+    client.post(f"/projects/{project_id}/branches", json={"name": "feature"})
+    client.post(f"/projects/{project_id}/branches/current", json={"name": "feature"})
+    _create_memory(client, project_id, "on feature")
+
+    feature = client.get(f"/projects/{project_id}/branches/current").json()
+    response = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"branch_id": feature["id"], "message": "feature state"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["branch_id"] == feature["id"]
+    assert len(body["members"]) == 2
+
+    main_snapshot = client.post(
+        f"/projects/{project_id}/snapshots", json={"branch_id": main["id"]}
+    ).json()
+    assert len(main_snapshot["members"]) == 1

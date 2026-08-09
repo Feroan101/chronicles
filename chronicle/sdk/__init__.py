@@ -22,6 +22,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    BranchKnowledgeRead,
+    BranchRead,
     ConfidenceRead,
     DecayAssessmentRead,
     DecayReportRead,
@@ -42,6 +44,8 @@ from chronicle.api.schemas import (
 from chronicle.core import (
     DECAY_FRESH_DAYS,
     DECAY_STALE_DAYS,
+    BranchNameConflictError,
+    BranchNotFoundError,
     ChronicleEngine,
     ChronicleError,
     ConfidenceScoreRangeError,
@@ -87,6 +91,10 @@ def _project(project) -> ProjectRead:
     return ProjectRead.model_validate(project)
 
 
+def _branch(branch) -> BranchRead:
+    return BranchRead.model_validate(branch)
+
+
 def _memory(memory) -> MemoryRead:
     return MemoryRead.model_validate(memory)
 
@@ -113,6 +121,13 @@ def _relationship(relationship) -> RelationshipRead:
 
 def _snapshot(snapshot) -> SnapshotRead:
     return SnapshotRead.model_validate(snapshot)
+
+
+def _branch_knowledge(item) -> BranchKnowledgeRead:
+    return BranchKnowledgeRead(
+        memory=MemorySummaryRead.model_validate(item.memory),
+        version=MemoryVersionRead.model_validate(item.version),
+    )
 
 
 class Chronicle:
@@ -156,6 +171,62 @@ class Chronicle:
             raise ProjectNotFoundError(project_id)
         return _project(project)
 
+    # ------------------------------------------------------------------
+    # Branch methods
+    # ------------------------------------------------------------------
+
+    def create_branch(
+        self,
+        project_id: str,
+        name: str,
+        source_branch_id: str | None = None,
+    ) -> BranchRead:
+        """Create a new branch in a project.
+
+        New branches start from the project's current branch unless
+        ``source_branch_id`` is given.
+        """
+        return _branch(
+            self._engine.create_branch(
+                project_id=project_id, name=name, source_branch_id=source_branch_id
+            )
+        )
+
+    def list_branches(self, project_id: str) -> list[BranchRead]:
+        """List all branches in a project, active first, in creation order."""
+        return [_branch(branch) for branch in self._engine.list_branches(project_id)]
+
+    def get_branch(self, branch_id: str) -> BranchRead:
+        """Get a branch by ID.
+
+        Raises ``BranchNotFoundError`` if no such branch exists.
+        """
+        branch = self._engine.get_branch(branch_id)
+        if branch is None:
+            raise BranchNotFoundError(branch_id)
+        return _branch(branch)
+
+    def get_current_branch(self, project_id: str) -> BranchRead:
+        """Get the currently active branch of a project."""
+        return _branch(self._engine.get_current_branch(project_id))
+
+    def switch_branch(self, project_id: str, name: str) -> BranchRead:
+        """Activate a branch in a project.
+
+        All subsequent reads and writes for the project use the active branch.
+        """
+        return _branch(self._engine.switch_branch(project_id=project_id, name=name))
+
+    def get_branch_knowledge(self, branch_id: str) -> list[BranchKnowledgeRead]:
+        """Get the knowledge visible from a branch.
+
+        Returns the current version of every memory that belongs to the branch
+        or was created before the branch forked.
+        """
+        return [
+            _branch_knowledge(item) for item in self._engine.get_branch_knowledge(branch_id)
+        ]
+
     def create_memory(
         self,
         project_id: str,
@@ -165,6 +236,7 @@ class Chronicle:
         git_branch: str | None = None,
         git_commit: str | None = None,
         git_description: str | None = None,
+        branch_id: str | None = None,
     ) -> MemoryRead:
         """Store a new memory in a project, with its first version."""
         git_ctx = None
@@ -177,6 +249,7 @@ class Chronicle:
                 type=type,
                 context=context,
                 git_context=git_ctx,
+                branch_id=branch_id,
             )
         )
 
@@ -190,9 +263,12 @@ class Chronicle:
             raise MemoryNotFoundError(memory_id)
         return _memory(memory)
 
-    def list_memories(self, project_id: str) -> list[MemoryRead]:
+    def list_memories(self, project_id: str, branch_id: str | None = None) -> list[MemoryRead]:
         """List all memories in a project, ordered by creation."""
-        return [_memory(memory) for memory in self._engine.list_memories(project_id)]
+        return [
+            _memory(memory)
+            for memory in self._engine.list_memories(project_id, branch_id=branch_id)
+        ]
 
     def update_memory(self, memory_id: str, type: str | None = UNSET) -> MemoryRead:
         """Update the type of a memory.
@@ -214,6 +290,7 @@ class Chronicle:
         git_branch: str | None = None,
         git_commit: str | None = None,
         git_description: str | None = None,
+        branch_id: str | None = None,
     ) -> MemoryVersionRead:
         """Append a new version of a memory."""
         git_ctx = None
@@ -225,6 +302,7 @@ class Chronicle:
                 content=content,
                 context=context,
                 git_context=git_ctx,
+                branch_id=branch_id,
             )
         )
 
@@ -233,11 +311,18 @@ class Chronicle:
         evidence = self._engine.get_evidence(memory_id=memory_id, sequence=sequence)
         return [EvidenceRead.model_validate(e) for e in evidence]
 
-    def search(self, query: str, project_id: str | None = None) -> list[SearchHitRead]:
+    def search(
+        self,
+        query: str,
+        project_id: str | None = None,
+        branch_id: str | None = None,
+    ) -> list[SearchHitRead]:
         """Search project knowledge, returning the current version of matches."""
         return [
             _search_hit(result)
-            for result in self._engine.search(query=query, project_id=project_id)
+            for result in self._engine.search(
+                query=query, project_id=project_id, branch_id=branch_id
+            )
         ]
 
     # ------------------------------------------------------------------
@@ -308,9 +393,15 @@ class Chronicle:
     # Snapshot methods
     # ------------------------------------------------------------------
 
-    def create_snapshot(self, project_id: str, message: str | None = None) -> SnapshotRead:
+    def create_snapshot(
+        self, project_id: str, message: str | None = None, branch_id: str | None = None
+    ) -> SnapshotRead:
         """Create a snapshot of the project's current knowledge state."""
-        return _snapshot(self._engine.create_snapshot(project_id=project_id, message=message))
+        return _snapshot(
+            self._engine.create_snapshot(
+                project_id=project_id, message=message, branch_id=branch_id
+            )
+        )
 
     def get_snapshot(self, snapshot_id: str) -> SnapshotRead:
         """Get a snapshot by ID.
@@ -322,9 +413,12 @@ class Chronicle:
             raise SnapshotNotFoundError(snapshot_id)
         return _snapshot(snapshot)
 
-    def list_snapshots(self, project_id: str) -> list[SnapshotRead]:
+    def list_snapshots(self, project_id: str, branch_id: str | None = None) -> list[SnapshotRead]:
         """List all snapshots for a project."""
-        return [_snapshot(snapshot) for snapshot in self._engine.list_snapshots(project_id)]
+        return [
+            _snapshot(snapshot)
+            for snapshot in self._engine.list_snapshots(project_id, branch_id=branch_id)
+        ]
 
     # ------------------------------------------------------------------
     # Confidence methods
@@ -510,6 +604,8 @@ __all__ = [
     "Chronicle",
     "UNSET",
     "ChronicleError",
+    "BranchNameConflictError",
+    "BranchNotFoundError",
     "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
     "DecayAssessmentRead",
@@ -529,6 +625,8 @@ __all__ = [
     "SearchQueryError",
     "SelfRelationshipError",
     "SnapshotNotFoundError",
+    "BranchKnowledgeRead",
+    "BranchRead",
     "ConfidenceRead",
     "EvidenceRead",
     "MemoryRead",

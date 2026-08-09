@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from chronicle import __version__
 from chronicle.api.routes import router
 from chronicle.core import (
+    BranchNameConflictError,
+    BranchNotFoundError,
     ChronicleEngine,
     ChronicleError,
     ConfidenceScoreRangeError,
@@ -31,6 +33,7 @@ _STATUS_CODES: dict[type[ChronicleError], int] = {
     ProjectNotFoundError: 404,
     MemoryNotFoundError: 404,
     MemoryVersionNotFoundError: 404,
+    BranchNotFoundError: 404,
     ObservationNotFoundError: 404,
     RelationshipNotFoundError: 404,
     SnapshotNotFoundError: 404,
@@ -41,6 +44,7 @@ _STATUS_CODES: dict[type[ChronicleError], int] = {
     SelfRelationshipError: 400,
     CrossProjectRelationshipError: 400,
     ConfidenceScoreRangeError: 400,
+    BranchNameConflictError: 409,
 }
 
 

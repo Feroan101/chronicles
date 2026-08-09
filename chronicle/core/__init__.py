@@ -1,6 +1,8 @@
 from chronicle.core.engine import (
     DECAY_FRESH_DAYS,
     DECAY_STALE_DAYS,
+    DEFAULT_BRANCH_NAME,
+    BranchKnowledge,
     ChronicleEngine,
     DecayAssessment,
     DecayReport,
@@ -11,6 +13,8 @@ from chronicle.core.engine import (
     VerificationResult,
 )
 from chronicle.core.errors import (
+    BranchNameConflictError,
+    BranchNotFoundError,
     ChronicleError,
     ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
@@ -32,8 +36,12 @@ from chronicle.core.git import GitContext
 __all__ = [
     "ChronicleEngine",
     "ChronicleError",
+    "BranchKnowledge",
+    "BranchNameConflictError",
+    "BranchNotFoundError",
     "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
+    "DEFAULT_BRANCH_NAME",
     "DECAY_FRESH_DAYS",
     "DECAY_STALE_DAYS",
     "DecayAssessment",

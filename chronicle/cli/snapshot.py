@@ -11,10 +11,16 @@ snapshot_app = typer.Typer(help="Manage project snapshots.")
 def create(
     project_id: str = typer.Option(..., help="Project id to snapshot."),
     message: str | None = typer.Option(None, help="Optional snapshot message."),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Chronicle branch id. Defaults to the project's current branch."
+    ),
 ) -> None:
-    snapshot = ctx.engine().create_snapshot(project_id=project_id, message=message)
+    snapshot = ctx.engine().create_snapshot(
+        project_id=project_id, message=message, branch_id=branch
+    )
     typer.echo(f"Created snapshot {snapshot.id}")
     typer.echo(f"  project: {snapshot.project_id}")
+    typer.echo(f"  branch: {snapshot.branch_id or '-'}")
     typer.echo(f"  message: {snapshot.message or '(none)'}")
     typer.echo(f"  members: {len(snapshot.members)}")
     typer.echo(f"  relationships: {len(snapshot.snapshot_relationships)}")
@@ -24,8 +30,15 @@ def create(
 @command_errors
 def list_snapshots(
     project_id: str = typer.Option(..., help="Project id to list snapshots for."),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Chronicle branch id. Defaults to the project's current branch."
+    ),
 ) -> None:
-    snapshots = ctx.engine().list_snapshots(project_id=project_id)
+    engine = ctx.engine()
+    if branch:
+        snapshots = engine.list_snapshots(project_id=project_id, branch_id=branch)
+    else:
+        snapshots = engine.list_snapshots(project_id=project_id)
     if not snapshots:
         typer.echo("No snapshots.")
         return

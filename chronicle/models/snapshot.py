@@ -10,6 +10,7 @@ from chronicle.models.base import Base
 from chronicle.utils.time import utcnow
 
 if TYPE_CHECKING:
+    from chronicle.models.branch import Branch
     from chronicle.models.project import Project
     from chronicle.models.snapshot_member import SnapshotMember
     from chronicle.models.snapshot_relationship import SnapshotRelationship
@@ -23,10 +24,14 @@ class Snapshot(Base):
     parent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("snapshots.id"), nullable=True
     )
+    branch_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("branches.id"), nullable=True
+    )
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="snapshots")
+    branch: Mapped[Branch | None] = relationship(back_populates="snapshots")
     parent: Mapped[Snapshot | None] = relationship(
         remote_side="Snapshot.id", back_populates="children"
     )

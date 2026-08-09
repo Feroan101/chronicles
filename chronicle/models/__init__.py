@@ -1,4 +1,6 @@
 from chronicle.models.base import Base
+from chronicle.models.branch import Branch
+from chronicle.models.branch_member import BranchMember
 from chronicle.models.confidence import ConfidenceScore
 from chronicle.models.config import ConfigEntry
 from chronicle.models.evidence import Evidence
@@ -12,6 +14,8 @@ from chronicle.models.snapshot_relationship import SnapshotRelationship
 
 __all__ = [
     "Base",
+    "Branch",
+    "BranchMember",
     "ConfigEntry",
     "ConfidenceScore",
     "Evidence",

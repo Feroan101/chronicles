@@ -20,6 +20,18 @@ class SnapshotNotFoundError(ChronicleError):
         self.snapshot_id = snapshot_id
 
 
+class BranchNotFoundError(ChronicleError):
+    def __init__(self, branch_id: str) -> None:
+        super().__init__(f"Branch not found: {branch_id}")
+        self.branch_id = branch_id
+
+
+class BranchNameConflictError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Branch name already exists in the project: {name}")
+        self.name = name
+
+
 class SelfRelationshipError(ChronicleError):
     def __init__(self, memory_id: str) -> None:
         super().__init__(f"A Relationship cannot connect a Memory to itself: {memory_id}")

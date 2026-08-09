@@ -2,6 +2,10 @@ from fastapi import APIRouter, Query
 
 from chronicle.api.deps import Engine
 from chronicle.api.schemas import (
+    BranchCreate,
+    BranchKnowledgeRead,
+    BranchRead,
+    BranchSwitch,
     ConfidenceRead,
     ConfidenceRecord,
     DecayAssessmentRead,
@@ -29,6 +33,7 @@ from chronicle.api.schemas import (
     VersionCreate,
 )
 from chronicle.core import (
+    BranchNotFoundError,
     ChronicleEngine,
     GitContext,
     GitContextError,
@@ -75,6 +80,62 @@ def get_project(project_id: str, engine: Engine) -> ProjectRead:
     return ProjectRead.model_validate(project)
 
 
+# ------------------------------------------------------------------
+# Branch endpoints
+# ------------------------------------------------------------------
+
+
+@router.post(
+    "/projects/{project_id}/branches", response_model=BranchRead, status_code=201
+)
+def create_branch(project_id: str, payload: BranchCreate, engine: Engine) -> BranchRead:
+    return BranchRead.model_validate(
+        engine.create_branch(
+            project_id=project_id,
+            name=payload.name,
+            source_branch_id=payload.source_branch_id,
+        )
+    )
+
+
+@router.get("/projects/{project_id}/branches", response_model=list[BranchRead])
+def list_branches(project_id: str, engine: Engine) -> list[BranchRead]:
+    return [BranchRead.model_validate(b) for b in engine.list_branches(project_id)]
+
+
+@router.get("/branches/{branch_id}", response_model=BranchRead)
+def get_branch(branch_id: str, engine: Engine) -> BranchRead:
+    branch = engine.get_branch(branch_id)
+    if branch is None:
+        raise BranchNotFoundError(branch_id)
+    return BranchRead.model_validate(branch)
+
+
+@router.get(
+    "/projects/{project_id}/branches/current", response_model=BranchRead
+)
+def get_current_branch(project_id: str, engine: Engine) -> BranchRead:
+    return BranchRead.model_validate(engine.get_current_branch(project_id))
+
+
+@router.post(
+    "/projects/{project_id}/branches/current", response_model=BranchRead
+)
+def switch_branch(project_id: str, payload: BranchSwitch, engine: Engine) -> BranchRead:
+    return BranchRead.model_validate(engine.switch_branch(project_id, payload.name))
+
+
+@router.get("/branches/{branch_id}/knowledge", response_model=list[BranchKnowledgeRead])
+def get_branch_knowledge(branch_id: str, engine: Engine) -> list[BranchKnowledgeRead]:
+    return [
+        BranchKnowledgeRead(
+            memory=MemorySummaryRead.model_validate(item.memory),
+            version=MemoryVersionRead.model_validate(item.version),
+        )
+        for item in engine.get_branch_knowledge(branch_id)
+    ]
+
+
 @router.post("/memories", response_model=MemoryRead, status_code=201)
 def create_memory(payload: MemoryCreate, engine: Engine) -> MemoryRead:
     return MemoryRead.model_validate(
@@ -94,8 +155,12 @@ def get_memory(memory_id: str, engine: Engine) -> MemoryRead:
 
 
 @router.get("/projects/{project_id}/memories", response_model=list[MemoryRead])
-def list_memories(project_id: str, engine: Engine) -> list[MemoryRead]:
-    memories = engine.list_memories(project_id)
+def list_memories(
+    project_id: str,
+    engine: Engine,
+    branch_id: str | None = Query(default=None),
+) -> list[MemoryRead]:
+    memories = engine.list_memories(project_id, branch_id=branch_id)
     return [MemoryRead.model_validate(memory) for memory in memories]
 
 
@@ -131,8 +196,9 @@ def search(
     query: str,
     engine: Engine,
     project_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
 ) -> list[SearchHitRead]:
-    results = engine.search(query=query, project_id=project_id)
+    results = engine.search(query=query, project_id=project_id, branch_id=branch_id)
     return [
         SearchHitRead(
             memory=MemorySummaryRead.model_validate(result.memory),
@@ -231,13 +297,24 @@ def remove_relationship(relationship_id: str, engine: Engine) -> None:
 @router.post("/projects/{project_id}/snapshots", response_model=SnapshotRead, status_code=201)
 def create_snapshot(project_id: str, payload: SnapshotCreate, engine: Engine) -> SnapshotRead:
     return SnapshotRead.model_validate(
-        engine.create_snapshot(project_id=project_id, message=payload.message)
+        engine.create_snapshot(
+            project_id=project_id,
+            message=payload.message,
+            branch_id=payload.branch_id,
+        )
     )
 
 
 @router.get("/projects/{project_id}/snapshots", response_model=list[SnapshotRead])
-def list_snapshots(project_id: str, engine: Engine) -> list[SnapshotRead]:
-    return [SnapshotRead.model_validate(snapshot) for snapshot in engine.list_snapshots(project_id)]
+def list_snapshots(
+    project_id: str,
+    engine: Engine,
+    branch_id: str | None = Query(default=None),
+) -> list[SnapshotRead]:
+    return [
+        SnapshotRead.model_validate(snapshot)
+        for snapshot in engine.list_snapshots(project_id, branch_id=branch_id)
+    ]
 
 
 @router.get("/snapshots/{snapshot_id}", response_model=SnapshotRead)

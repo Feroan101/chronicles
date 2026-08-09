@@ -32,8 +32,8 @@ def project(engine):
     return engine.create_project(name="demo")
 
 
-def _search(engine, query, project_id=None):
-    return engine.search(query=query, project_id=project_id)
+def _search(engine, query, project_id=None, branch_id=None):
+    return engine.search(query=query, project_id=project_id, branch_id=branch_id)
 
 
 def test_search_finds_matching_content(engine, project):
@@ -261,3 +261,27 @@ def test_search_is_case_insensitive(engine, project):
 
     assert len(_search(engine, "deployment")) == 1
     assert len(_search(engine, "Deployment")) == 1
+
+
+def test_search_restricted_to_branch(engine, project):
+    main_branch = engine.get_branch_by_name(project.id, "main")
+    assert main_branch is not None
+
+    engine.create_branch(project.id, "feature")
+    engine.create_memory(project_id=project.id, content="main deployment plan")
+
+    engine.switch_branch(project.id, "feature")
+    engine.create_memory(project_id=project.id, content="feature deployment plan")
+
+    all_hits = _search(engine, "deployment", project_id=project.id)
+    assert len(all_hits) == 2
+
+    main_hits = _search(engine, "deployment", project_id=project.id, branch_id=main_branch.id)
+    assert len(main_hits) == 1
+    assert {hit.version.content for hit in main_hits} == {"main deployment plan"}
+
+    branch = engine.get_branch_by_name(project.id, "feature")
+    assert branch is not None
+    scoped_hits = _search(engine, "deployment", project_id=project.id, branch_id=branch.id)
+    assert len(scoped_hits) == 1
+    assert {hit.version.content for hit in scoped_hits} == {"feature deployment plan"}

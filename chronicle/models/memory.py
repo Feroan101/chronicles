@@ -18,6 +18,7 @@ from chronicle.models.base import Base
 from chronicle.utils.time import utcnow
 
 if TYPE_CHECKING:
+    from chronicle.models.branch_member import BranchMember
     from chronicle.models.confidence import ConfidenceScore
     from chronicle.models.evidence import Evidence
     from chronicle.models.project import Project
@@ -42,6 +43,9 @@ class Memory(Base):
     )
     incoming_relationships: Mapped[list[Relationship]] = relationship(
         foreign_keys="Relationship.to_memory_id", back_populates="target_memory"
+    )
+    branch_memberships: Mapped[list[BranchMember]] = relationship(
+        back_populates="memory", cascade="all, delete-orphan"
     )
 
 

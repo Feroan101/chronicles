@@ -15,6 +15,9 @@ def create(
     git_branch: str | None = typer.Option(None, help="Git branch name."),
     git_commit: str | None = typer.Option(None, help="Git commit hash."),
     git_description: str | None = typer.Option(None, help="Git change description."),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Chronicle branch id. Defaults to the parent the version's memory."
+    ),
 ) -> None:
     git_ctx = None
     if any([git_branch, git_commit, git_description]):
@@ -22,7 +25,7 @@ def create(
 
         git_ctx = GitContext(branch=git_branch, commit=git_commit, description=git_description)
     version = ctx.engine().create_version(
-        memory_id=memory_id, content=content, context=context, git_context=git_ctx
+        memory_id=memory_id, content=content, context=context, git_context=git_ctx, branch_id=branch
     )
     typer.echo(f"Created version {version.id}")
     typer.echo(f"  memory: {version.memory_id}")

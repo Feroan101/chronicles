@@ -8,6 +8,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.core.errors import (
+    BranchNameConflictError,
+    BranchNotFoundError,
     ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
     DecayConfigError,
@@ -24,6 +26,7 @@ from chronicle.core.errors import (
 )
 from chronicle.core.git import GitContext, GitTree, read_git_tree
 from chronicle.models import (
+    Branch,
     ConfidenceScore,
     Evidence,
     Memory,
@@ -36,6 +39,8 @@ from chronicle.models import (
     SnapshotRelationship,
 )
 from chronicle.storage import (
+    BranchMemberRepository,
+    BranchRepository,
     ConfidenceRepository,
     EvidenceRepository,
     MemoryRepository,
@@ -52,6 +57,8 @@ from chronicle.utils.time import utcnow
 
 _UNSET = object()
 
+DEFAULT_BRANCH_NAME = "main"
+
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -60,6 +67,14 @@ class SearchResult:
     memory: Memory
     version: MemoryVersion
     rank: float
+
+
+@dataclass(frozen=True)
+class BranchKnowledge:
+    """The Version currently visible for a Memory on a Branch."""
+
+    memory: Memory
+    version: MemoryVersion
 
 
 @dataclass(frozen=True)
@@ -202,7 +217,17 @@ class ChronicleEngine:
     def create_project(self, name: str, description: str | None = None) -> Project:
         with self._transaction() as session:
             project = Project(id=new_uuid(), name=name, description=description)
-            return ProjectRepository(session).create(project)
+            ProjectRepository(session).create(project)
+            branch = Branch(
+                id=new_uuid(),
+                project_id=project.id,
+                name=DEFAULT_BRANCH_NAME,
+                is_default=True,
+            )
+            BranchRepository(session).create(branch)
+            project.default_branch_id = branch.id
+            project.current_branch_id = branch.id
+            return project
 
     def get_project(self, project_id: str) -> Project | None:
         with self._transaction() as session:
@@ -215,10 +240,12 @@ class ChronicleEngine:
         type: str | None = None,
         context: str | None = None,
         git_context: GitContext | None = None,
+        branch_id: str | None = None,
     ) -> Memory:
         with self._transaction() as session:
             if ProjectRepository(session).get(project_id) is None:
                 raise ProjectNotFoundError(project_id)
+            target_branch_id = self._resolve_branch_context(session, project_id, branch_id)
             memory = Memory(id=new_uuid(), project_id=project_id, type=type)
             MemoryRepository(session).create(memory)
             version = MemoryVersion(
@@ -234,6 +261,7 @@ class ChronicleEngine:
             _ = memory.versions
             for v in memory.versions:
                 _ = v.evidence
+            BranchMemberRepository(session).set(target_branch_id, memory.id, version.id)
             return memory
 
     def get_memory(self, memory_id: str) -> Memory | None:
@@ -255,10 +283,13 @@ class ChronicleEngine:
         content: str,
         context: str | None = None,
         git_context: GitContext | None = None,
+        branch_id: str | None = None,
     ) -> MemoryVersion:
         with self._transaction() as session:
-            if MemoryRepository(session).get(memory_id) is None:
+            memory = MemoryRepository(session).get(memory_id)
+            if memory is None:
                 raise MemoryNotFoundError(memory_id)
+            target_branch_id = self._resolve_branch_context(session, memory.project_id, branch_id)
             next_sequence = MemoryVersionRepository(session).highest_sequence(memory_id) + 1
             version = MemoryVersion(
                 id=new_uuid(),
@@ -271,11 +302,22 @@ class ChronicleEngine:
             self._record_git_context(session, version, git_context)
             session.flush()
             _ = version.evidence
+            BranchMemberRepository(session).set(target_branch_id, memory_id, version.id)
             return version
 
-    def list_memories(self, project_id: str) -> list[Memory]:
+    def list_memories(self, project_id: str, branch_id: str | None = None) -> list[Memory]:
         with self._transaction() as session:
-            return MemoryRepository(session).list_by_project(project_id)
+            if branch_id is None:
+                return MemoryRepository(session).list_by_project(project_id)
+            resolved = self._resolve_branch_context(session, project_id, branch_id)
+            members = {
+                m.memory_id for m in BranchMemberRepository(session).list_by_branch(resolved)
+            }
+            return [
+                memory
+                for memory in MemoryRepository(session).list_by_project(project_id)
+                if memory.id in members
+            ]
 
     def get_version(self, memory_id: str, sequence: int) -> MemoryVersion | None:
         with self._transaction() as session:
@@ -316,12 +358,75 @@ class ChronicleEngine:
                     )
                 )
 
-    def search(self, query: str, project_id: str | None = None) -> list[SearchResult]:
+    def _ensure_default_branch(self, session: Session, project_id: str) -> Branch:
+        """Return the Project's default Branch, self-healing legacy Projects.
+
+        Projects created before Branches existed have no default branch. A
+        ``main`` Branch is created on demand and set as the default/current
+        branch so branch-aware operations always have a context.
+        """
+        project = ProjectRepository(session).get(project_id)
+        if project is None:
+            raise ProjectNotFoundError(project_id)
+        default = (
+            BranchRepository(session).get(project.default_branch_id)
+            if project.default_branch_id is not None
+            else None
+        )
+        if default is not None:
+            if project.current_branch_id is None:
+                project.current_branch_id = default.id
+            return default
+        existing = BranchRepository(session).get_by_name(project_id, DEFAULT_BRANCH_NAME)
+        if existing is not None:
+            project.default_branch_id = existing.id
+            project.current_branch_id = existing.id
+            return existing
+        branch = Branch(
+            id=new_uuid(),
+            project_id=project_id,
+            name=DEFAULT_BRANCH_NAME,
+            is_default=True,
+        )
+        BranchRepository(session).create(branch)
+        project.default_branch_id = branch.id
+        project.current_branch_id = branch.id
+        return branch
+
+    def _resolve_branch_context(
+        self, session: Session, project_id: str, branch_id: str | None
+    ) -> str:
+        """Resolve the Branch id used as the knowledge context.
+
+        An explicit ``branch_id`` must belong to the Project; otherwise the
+        Project's persisted current Branch is used.
+        """
+        if branch_id is not None:
+            branch = BranchRepository(session).get(branch_id)
+            if branch is None or branch.project_id != project_id:
+                raise BranchNotFoundError(branch_id)
+            return branch.id
+        self._ensure_default_branch(session, project_id)
+        project = ProjectRepository(session).get(project_id)
+        branch = BranchRepository(session).get(
+            project.current_branch_id or project.default_branch_id
+        )
+        if branch is None:
+            raise BranchNotFoundError(project.default_branch_id or "(none)")
+        return branch.id
+
+    def search(
+        self,
+        query: str,
+        project_id: str | None = None,
+        branch_id: str | None = None,
+    ) -> list[SearchResult]:
         """Search Memories by keyword content.
 
         Only the Current Version of each Memory is returned, and each Memory
         appears at most once. When ``project_id`` is supplied, results are
-        restricted to that Project.
+        restricted to that Project. When ``branch_id`` is supplied, results are
+        restricted to that Branch's current knowledge state.
         """
         if not query or not query.strip():
             raise SearchQueryError(query)
@@ -332,13 +437,38 @@ class ChronicleEngine:
                 rows = MemoryRepository(session).search(query, project_id)
             except OperationalError as exc:
                 raise SearchQueryError(query, detail=str(exc)) from exc
-            current_sequences = MemoryVersionRepository(session).highest_sequences(
-                [memory.id for memory, _, _ in rows]
-            )
-            results = []
+
+            if branch_id is None:
+                current_sequences = MemoryVersionRepository(session).highest_sequences(
+                    [memory.id for memory, _, _ in rows]
+                )
+                results = []
+                for memory, version, rank in rows:
+                    if version.sequence != current_sequences.get(memory.id):
+                        continue
+                    results.append(SearchResult(memory=memory, version=version, rank=rank))
+                return results
+
+            branch = BranchRepository(session).get(branch_id)
+            if branch is None:
+                raise BranchNotFoundError(branch_id)
+            if project_id is not None and project_id != branch.project_id:
+                raise BranchNotFoundError(branch_id)
+
+            member_versions = {
+                member.memory_id: member.memory_version_id
+                for member in BranchMemberRepository(session).list_by_branch(branch.id)
+            }
+            results: list[SearchResult] = []
+            seen: set[str] = set()
             for memory, version, rank in rows:
-                if version.sequence != current_sequences.get(memory.id):
+                if project_id is None and memory.project_id != branch.project_id:
                     continue
+                if member_versions.get(memory.id) != version.id:
+                    continue
+                if memory.id in seen:
+                    continue
+                seen.add(memory.id)
                 results.append(SearchResult(memory=memory, version=version, rank=rank))
             return results
 
@@ -495,33 +625,165 @@ class ChronicleEngine:
                 raise RelationshipNotFoundError(relationship_id)
 
     # ------------------------------------------------------------------
+    # Branch operations
+    # ------------------------------------------------------------------
+
+    def create_branch(
+        self,
+        project_id: str,
+        name: str,
+        source_branch_id: str | None = None,
+    ) -> Branch:
+        """Create a Branch for a Project.
+
+        The new branch starts from the source branch's knowledge state
+        (default: the Project's current branch). Branch names must be unique
+        within the Project. Members are shared references to existing Memory
+        Versions; no Memory is duplicated.
+        """
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            self._ensure_default_branch(session, project_id)
+            if BranchRepository(session).get_by_name(project_id, name) is not None:
+                raise BranchNameConflictError(name)
+
+            source_id = self._resolve_branch_context(session, project_id, source_branch_id)
+            source_members = BranchMemberRepository(session).list_by_branch(source_id)
+
+            branch = Branch(id=new_uuid(), project_id=project_id, name=name, is_default=False)
+            BranchRepository(session).create(branch)
+            for member in source_members:
+                BranchMemberRepository(session).set(
+                    branch.id, member.memory_id, member.memory_version_id
+                )
+            return branch
+
+    def get_branch(self, branch_id: str) -> Branch | None:
+        """Retrieve a specific Branch, or None when it does not exist."""
+        with self._transaction() as session:
+            return BranchRepository(session).get(branch_id)
+
+    def get_branch_by_name(self, project_id: str, name: str) -> Branch | None:
+        """Retrieve a Branch by name within a Project, or None."""
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            self._ensure_default_branch(session, project_id)
+            return BranchRepository(session).get_by_name(project_id, name)
+
+    def list_branches(self, project_id: str) -> list[Branch]:
+        """List all Branches for a Project, ordered by creation."""
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            self._ensure_default_branch(session, project_id)
+            return BranchRepository(session).list_by_project(project_id)
+
+    def get_current_branch(self, project_id: str) -> Branch:
+        """Return the Project's current Branch (falling back to its default)."""
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            self._ensure_default_branch(session, project_id)
+            project = ProjectRepository(session).get(project_id)
+            branch = BranchRepository(session).get(project.current_branch_id)
+            if branch is not None:
+                return branch
+            project.current_branch_id = project.default_branch_id
+            branch = BranchRepository(session).get(project.default_branch_id)
+            if branch is None:
+                raise BranchNotFoundError(project.default_branch_id or "(default)")
+            return branch
+
+    def switch_branch(self, project_id: str, name: str) -> Branch:
+        """Switch the Project's active knowledge context to a Branch by name.
+
+        Branch switching only changes which Branch is used as the default
+        retrieval context; it never moves or deletes knowledge.
+        """
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+            self._ensure_default_branch(session, project_id)
+            branch = BranchRepository(session).get_by_name(project_id, name)
+            if branch is None:
+                raise BranchNotFoundError(name)
+            project = ProjectRepository(session).get(project_id)
+            project.current_branch_id = branch.id
+            return branch
+
+    def get_branch_knowledge(self, branch_id: str) -> list[BranchKnowledge]:
+        """Return the knowledge state of a Branch.
+
+        Each item pairs a Memory with the Version that Branch currently
+        exposes for it. Shared knowledge appears on every Branch that
+        references the same Version.
+        """
+        with self._transaction() as session:
+            branch = BranchRepository(session).get(branch_id)
+            if branch is None:
+                raise BranchNotFoundError(branch_id)
+            results: list[BranchKnowledge] = []
+            members = BranchMemberRepository(session).list_by_branch(branch.id)
+            members.sort(key=lambda member: (member.created_at, member.memory_id))
+            for member in members:
+                memory = MemoryRepository(session).get(member.memory_id)
+                version = MemoryVersionRepository(session).get(member.memory_version_id)
+                if memory is None or version is None:
+                    continue
+                results.append(BranchKnowledge(memory=memory, version=version))
+            return results
+
+    # ------------------------------------------------------------------
     # Snapshot operations
     # ------------------------------------------------------------------
 
-    def create_snapshot(self, project_id: str, message: str | None = None) -> Snapshot:
-        """Create a Snapshot of the Project's current knowledge state."""
+    def create_snapshot(
+        self, project_id: str, message: str | None = None, branch_id: str | None = None
+    ) -> Snapshot:
+        """Create a Snapshot of a Project's knowledge state.
+
+        Without a Branch context the Snapshot captures the Project's current
+        Versions (existing behavior). With ``branch_id`` the Snapshot captures
+        that Branch's knowledge state and records the Branch association.
+        """
         with self._transaction() as session:
             project = ProjectRepository(session).get(project_id)
             if project is None:
                 raise ProjectNotFoundError(project_id)
 
+            target_branch_id = None
+            if branch_id is not None:
+                target_branch_id = self._resolve_branch_context(session, project_id, branch_id)
+
             snapshot = Snapshot(
                 id=new_uuid(),
                 project_id=project_id,
+                branch_id=target_branch_id,
                 message=message,
                 created_at=utcnow(),
             )
             SnapshotRepository(session).create(snapshot)
 
-            memories = MemoryRepository(session).list_by_project(project_id)
             members: list[SnapshotMember] = []
-            for memory in memories:
-                current_version = MemoryVersionRepository(session).highest_version(memory.id)
-                if current_version is not None:
+            if target_branch_id is None:
+                memories = MemoryRepository(session).list_by_project(project_id)
+                for memory in memories:
+                    current_version = MemoryVersionRepository(session).highest_version(memory.id)
+                    if current_version is not None:
+                        members.append(
+                            SnapshotMember(
+                                snapshot_id=snapshot.id,
+                                memory_version_id=current_version.id,
+                            )
+                        )
+            else:
+                for member in BranchMemberRepository(session).list_by_branch(target_branch_id):
                     members.append(
                         SnapshotMember(
                             snapshot_id=snapshot.id,
-                            memory_version_id=current_version.id,
+                            memory_version_id=member.memory_version_id,
                         )
                     )
             if members:
@@ -556,10 +818,17 @@ class ChronicleEngine:
                 _ = snapshot.snapshot_relationships
             return snapshot
 
-    def list_snapshots(self, project_id: str) -> list[Snapshot]:
-        """List all Snapshots for a Project."""
+    def list_snapshots(self, project_id: str, branch_id: str | None = None) -> list[Snapshot]:
+        """List all Snapshots for a Project.
+
+        Without ``branch_id`` all Snapshots are returned (existing behavior).
+        With ``branch_id`` only Snapshots associated with that Branch are
+        returned.
+        """
         with self._transaction() as session:
-            snapshots = SnapshotRepository(session).list_by_project(project_id)
+            if branch_id is not None:
+                self._resolve_branch_context(session, project_id, branch_id)
+            snapshots = SnapshotRepository(session).list_by_project(project_id, branch_id)
             for snapshot in snapshots:
                 _ = snapshot.members
                 _ = snapshot.snapshot_relationships

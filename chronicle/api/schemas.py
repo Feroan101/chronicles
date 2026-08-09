@@ -95,6 +95,35 @@ class SearchHitRead(BaseModel):
 
 
 # ------------------------------------------------------------------
+# Branch schemas
+# ------------------------------------------------------------------
+
+
+class BranchCreate(BaseModel):
+    name: str
+    source_branch_id: str | None = None
+
+
+class BranchSwitch(BaseModel):
+    name: str
+
+
+class BranchRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    name: str
+    is_default: bool
+    created_at: datetime
+
+
+class BranchKnowledgeRead(BaseModel):
+    memory: MemorySummaryRead
+    version: MemoryVersionRead
+
+
+# ------------------------------------------------------------------
 # Observation schemas
 # ------------------------------------------------------------------
 
@@ -148,6 +177,7 @@ class RelationshipRead(BaseModel):
 
 class SnapshotCreate(BaseModel):
     message: str | None = None
+    branch_id: str | None = None
 
 
 class SnapshotMemberRead(BaseModel):
@@ -173,6 +203,7 @@ class SnapshotRead(BaseModel):
     id: str
     project_id: str
     parent_id: str | None
+    branch_id: str | None
     message: str | None
     created_at: datetime
     members: list[SnapshotMemberRead]

@@ -570,3 +570,54 @@ def test_assess_decay_does_not_affect_drift(chronicle: Chronicle, project_id: st
     assert [k.reason for k in after.affected_knowledge] == [
         k.reason for k in before.affected_knowledge
     ]
+
+
+def test_create_and_list_branches(chronicle: Chronicle, project_id: str):
+    branches = chronicle.list_branches(project_id)
+    assert len(branches) == 1
+    assert branches[0].is_default is True
+
+    branch = chronicle.create_branch(project_id, "experimental")
+    assert branch.name == "experimental"
+    assert branch.is_default is False
+
+    names = {b.name for b in chronicle.list_branches(project_id)}
+    assert names == {"main", "experimental"}
+
+
+def test_get_branch_and_current_branch(chronicle: Chronicle, project_id: str):
+    current = chronicle.get_current_branch(project_id)
+    assert current.is_default is True
+
+    fetched = chronicle.get_branch(current.id)
+    assert fetched.id == current.id
+
+
+def test_switch_branch_and_knowledge_scoping(chronicle: Chronicle, project_id: str):
+    chronicle.create_memory(project_id, "shared on main")
+
+    branch = chronicle.create_branch(project_id, "feature")
+    chronicle.switch_branch(project_id, "feature")
+    chronicle.create_memory(project_id, "only on feature")
+
+    feature_items = chronicle.get_branch_knowledge(branch.id)
+    assert {item.version.content for item in feature_items} == {"shared on main", "only on feature"}
+
+    main = chronicle.list_branches(project_id)[0]
+    main_items = chronicle.get_branch_knowledge(main.id)
+    assert {item.version.content for item in main_items} == {"shared on main"}
+
+    visible = chronicle.list_memories(project_id, branch_id=branch.id)
+    assert {m.versions[-1].content for m in visible} == {"shared on main", "only on feature"}
+
+    main_visible = chronicle.list_memories(project_id, branch_id=main.id)
+    assert {m.versions[-1].content for m in main_visible} == {"shared on main"}
+
+
+def test_branch_read_model_shapes(chronicle: Chronicle, project_id: str):
+    branch = chronicle.get_current_branch(project_id)
+    model = branch.model_dump()
+    assert set(model) == {"id", "project_id", "name", "is_default", "created_at"}
+
+    item = chronicle.get_branch_knowledge(branch.id)
+    assert item == []

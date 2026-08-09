@@ -5,6 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
+    BranchKnowledgeRead,
+    BranchRead,
     ConfidenceRead,
     DecayAssessmentRead,
     DecayReportRead,
@@ -23,6 +25,7 @@ from chronicle.api.schemas import (
     VerificationResultRead,
 )
 from chronicle.core import (
+    BranchNotFoundError,
     ChronicleEngine,
     GitContext,
     MemoryNotFoundError,
@@ -40,6 +43,10 @@ def default_session_factory() -> sessionmaker[Session]:
 
 def _project(project) -> dict:
     return ProjectRead.model_validate(project).model_dump(mode="json")
+
+
+def _branch(branch) -> dict:
+    return BranchRead.model_validate(branch).model_dump(mode="json")
 
 
 def _memory(memory) -> dict:
@@ -68,6 +75,13 @@ def _relationship(relationship) -> dict:
 
 def _snapshot(snapshot) -> dict:
     return SnapshotRead.model_validate(snapshot).model_dump(mode="json")
+
+
+def _branch_knowledge(item) -> dict:
+    return BranchKnowledgeRead(
+        memory=MemorySummaryRead.model_validate(item.memory),
+        version=MemoryVersionRead.model_validate(item.version),
+    ).model_dump(mode="json")
 
 
 def _confidence(score) -> dict | None:
@@ -118,6 +132,84 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             raise ProjectNotFoundError(project_id)
         return _project(project)
 
+    # ------------------------------------------------------------------
+    # Branch tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def create_branch(
+        project_id: str, name: str, source_branch_id: str | None = None
+    ) -> dict:
+        """Create a new branch in a project.
+
+        Branches hold independent lines of knowledge. New branches start from
+        the project's current branch unless ``source_branch_id`` is given.
+
+        Args:
+            project_id: The project ID.
+            name: The branch name (a valid identifier).
+            source_branch_id: Optional branch ID to fork from.
+        """
+        return _branch(
+            engine.create_branch(
+                project_id=project_id, name=name, source_branch_id=source_branch_id
+            )
+        )
+
+    @server.tool()
+    def list_branches(project_id: str) -> list:
+        """List all branches in a project.
+
+        Args:
+            project_id: The project ID.
+        """
+        return [_branch(branch) for branch in engine.list_branches(project_id)]
+
+    @server.tool()
+    def get_branch(branch_id: str) -> dict:
+        """Get a branch by ID.
+
+        Args:
+            branch_id: The branch ID.
+        """
+        branch = engine.get_branch(branch_id)
+        if branch is None:
+            raise BranchNotFoundError(branch_id)
+        return _branch(branch)
+
+    @server.tool()
+    def get_current_branch(project_id: str) -> dict:
+        """Get the currently active branch of a project.
+
+        Args:
+            project_id: The project ID.
+        """
+        return _branch(engine.get_current_branch(project_id))
+
+    @server.tool()
+    def switch_branch(project_id: str, name: str) -> dict:
+        """Activate a branch in a project.
+
+        All subsequent writes and reads for the project use the active branch.
+
+        Args:
+            project_id: The project ID.
+            name: The branch name to activate.
+        """
+        return _branch(engine.switch_branch(project_id=project_id, name=name))
+
+    @server.tool()
+    def get_branch_knowledge(branch_id: str) -> list:
+        """Get the knowledge visible from a branch.
+
+        Returns the current version of every memory that belongs to the branch
+        or was created before the branch forked.
+
+        Args:
+            branch_id: The branch ID.
+        """
+        return [_branch_knowledge(item) for item in engine.get_branch_knowledge(branch_id)]
+
     @server.tool()
     def create_memory(
         project_id: str,
@@ -127,6 +219,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         git_branch: str | None = None,
         git_commit: str | None = None,
         git_description: str | None = None,
+        branch_id: str | None = None,
     ) -> dict:
         """Store a new memory in a project.
 
@@ -140,6 +233,8 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             git_branch: Optional Git branch name.
             git_commit: Optional Git commit hash.
             git_description: Optional description of the Git change.
+            branch_id: Optional chronicle branch ID to write to; defaults to
+                the project's current branch.
         """
         git_ctx = None
         if any([git_branch, git_commit, git_description]):
@@ -151,6 +246,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
                 type=type,
                 context=context,
                 git_context=git_ctx,
+                branch_id=branch_id,
             )
         )
 
@@ -167,13 +263,15 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         return _memory(memory)
 
     @server.tool()
-    def list_memories(project_id: str) -> list:
+    def list_memories(project_id: str, branch_id: str | None = None) -> list:
         """List all memories in a project, ordered by creation.
 
         Args:
             project_id: The project ID.
+            branch_id: Optional branch ID to scope the list to; defaults to
+                the project's current branch.
         """
-        return [_memory(memory) for memory in engine.list_memories(project_id)]
+        return [_memory(memory) for memory in engine.list_memories(project_id, branch_id=branch_id)]
 
     @server.tool()
     def update_memory(memory_id: str, type: str | None = None) -> dict:
@@ -200,6 +298,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         git_branch: str | None = None,
         git_commit: str | None = None,
         git_description: str | None = None,
+        branch_id: str | None = None,
     ) -> dict:
         """Append a new version of a memory.
 
@@ -210,6 +309,8 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             git_branch: Optional Git branch name.
             git_commit: Optional Git commit hash.
             git_description: Optional description of the Git change.
+            branch_id: Optional chronicle branch ID to write to; defaults to
+                the branch the memory is currently on.
         """
         git_ctx = None
         if any([git_branch, git_commit, git_description]):
@@ -220,6 +321,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
                 content=content,
                 context=context,
                 git_context=git_ctx,
+                branch_id=branch_id,
             )
         )
 
@@ -235,7 +337,9 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         return [EvidenceRead.model_validate(e).model_dump(mode="json") for e in evidence]
 
     @server.tool()
-    def search(query: str, project_id: str | None = None) -> list:
+    def search(
+        query: str, project_id: str | None = None, branch_id: str | None = None
+    ) -> list:
         """Search project knowledge.
 
         Only the current version of each memory is returned, and each memory
@@ -244,8 +348,13 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         Args:
             query: The search terms.
             project_id: Restrict results to a project, or null to search all.
+            branch_id: Restrict results to a branch, or null to search the
+                project's current branch.
         """
-        return [_search_hit(result) for result in engine.search(query=query, project_id=project_id)]
+        return [
+            _search_hit(result)
+            for result in engine.search(query=query, project_id=project_id, branch_id=branch_id)
+        ]
 
     # ------------------------------------------------------------------
     # Observation tools
@@ -350,14 +459,20 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
     # ------------------------------------------------------------------
 
     @server.tool()
-    def create_snapshot(project_id: str, message: str | None = None) -> dict:
+    def create_snapshot(
+        project_id: str, message: str | None = None, branch_id: str | None = None
+    ) -> dict:
         """Create a snapshot of the project's current knowledge state.
 
         Args:
             project_id: The project ID to snapshot.
             message: An optional message describing the snapshot.
+            branch_id: Optional branch ID to snapshot; defaults to the
+                project's current branch.
         """
-        return _snapshot(engine.create_snapshot(project_id=project_id, message=message))
+        return _snapshot(
+            engine.create_snapshot(project_id=project_id, message=message, branch_id=branch_id)
+        )
 
     @server.tool()
     def get_snapshot(snapshot_id: str) -> dict:
@@ -372,13 +487,18 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         return _snapshot(snapshot)
 
     @server.tool()
-    def list_snapshots(project_id: str) -> list:
+    def list_snapshots(project_id: str, branch_id: str | None = None) -> list:
         """List all snapshots for a project.
 
         Args:
             project_id: The project ID.
+            branch_id: Optional branch ID to scope the list to; defaults to
+                the project's current branch.
         """
-        return [_snapshot(snapshot) for snapshot in engine.list_snapshots(project_id)]
+        return [
+            _snapshot(snapshot)
+            for snapshot in engine.list_snapshots(project_id, branch_id=branch_id)
+        ]
 
     # ------------------------------------------------------------------
     # Confidence tools

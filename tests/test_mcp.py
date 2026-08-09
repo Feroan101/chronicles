@@ -64,6 +64,12 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
         assert {tool.name for tool in tools.tools} == {
             "create_project",
             "get_project",
+            "create_branch",
+            "list_branches",
+            "get_branch",
+            "get_current_branch",
+            "switch_branch",
+            "get_branch_knowledge",
             "create_memory",
             "get_memory",
             "list_memories",
@@ -104,6 +110,10 @@ async def test_tool_input_schemas(server_dir):
         assert set(tools["search"]["required"]) == {"query"}
         assert set(tools["detect_drift"]["required"]) == {"project_id"}
         assert set(tools["assess_decay"]["required"]) == {"project_id"}
+
+        assert set(tools["create_branch"]["required"]) == {"project_id", "name"}
+        assert set(tools["switch_branch"]["required"]) == {"project_id", "name"}
+        assert set(tools["get_branch_knowledge"]["required"]) == {"branch_id"}
 
 
 @pytest.mark.anyio
@@ -771,3 +781,95 @@ async def test_assess_decay_unknown_project_errors(server_dir):
     async with _session(server_dir) as session:
         message = await _err(session, "assess_decay", {"project_id": "missing"})
         assert "Project not found: missing" in message
+
+
+# ----------------------------------------------------------------------
+# Branch tools
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_create_and_list_branches(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+
+        branches = await _ok_list(session, "list_branches", {"project_id": project["id"]})
+        assert len(branches) == 1
+        assert branches[0]["is_default"] is True
+
+        branch = await _ok(
+            session, "create_branch", {"project_id": project["id"], "name": "experimental"}
+        )
+        assert branch["name"] == "experimental"
+        assert branch["is_default"] is False
+
+        listed = await _ok_list(session, "list_branches", {"project_id": project["id"]})
+        names = {b["name"] for b in listed}
+        assert names == {"main", "experimental"}
+
+
+@pytest.mark.anyio
+async def test_create_branch_duplicate_name_errors(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(session, "create_branch", {"project_id": project["id"], "name": "experimental"})
+
+        message = await _err(
+            session,
+            "create_branch",
+            {"project_id": project["id"], "name": "experimental"},
+        )
+        assert "Branch name already exists in the project" in message
+
+
+@pytest.mark.anyio
+async def test_switch_branch_and_get_knowledge(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(session, "create_memory", {"project_id": project["id"], "content": "shared"})
+
+        branch = await _ok(
+            session, "create_branch", {"project_id": project["id"], "name": "feature"}
+        )
+        await _ok(session, "switch_branch", {"project_id": project["id"], "name": "feature"})
+        await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "feature only"}
+        )
+
+        current = await _ok(session, "get_current_branch", {"project_id": project["id"]})
+        assert current["name"] == "feature"
+
+        items = await _ok_list(session, "get_branch_knowledge", {"branch_id": branch["id"]})
+        contents = {item["version"]["content"] for item in items}
+        assert contents == {"shared", "feature only"}
+
+        scoped = await _ok_list(
+            session, "list_memories", {"project_id": project["id"], "branch_id": branch["id"]}
+        )
+        scoped_contents = {memory["versions"][-1]["content"] for memory in scoped}
+        assert scoped_contents == {"shared", "feature only"}
+
+
+@pytest.mark.anyio
+async def test_branch_tools_error_cases(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "get_branch", {"branch_id": "missing"})
+        assert "Branch not found: missing" in message
+
+
+@pytest.mark.anyio
+async def test_create_memory_on_explicit_branch(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        branch = await _ok(
+            session, "create_branch", {"project_id": project["id"], "name": "feature"}
+        )
+
+        await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "scoped", "branch_id": branch["id"]},
+        )
+
+        items = await _ok_list(session, "get_branch_knowledge", {"branch_id": branch["id"]})
+        assert [item["version"]["content"] for item in items] == ["scoped"]

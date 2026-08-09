@@ -1,5 +1,6 @@
 import typer
 
+from chronicle.cli.branch import branch_app
 from chronicle.cli.confidence import confidence_app
 from chronicle.cli.decay import decay
 from chronicle.cli.drift import drift
@@ -20,6 +21,7 @@ app.command("search")(search_command)
 app.command("drift")(drift)
 app.command("decay")(decay)
 app.add_typer(project_app, name="project")
+app.add_typer(branch_app, name="branch")
 app.add_typer(memory_app, name="memory")
 app.add_typer(version_app, name="version")
 app.add_typer(observation_app, name="observation")
