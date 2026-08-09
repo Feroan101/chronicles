@@ -519,6 +519,8 @@ class ChronicleEngine:
             if observation.status != "pending":
                 raise ObservationAlreadyProcessedError(observation_id, observation.status)
 
+            target_branch_id = self._resolve_branch_context(session, observation.project_id, None)
+
             if action == "create_memory":
                 memory = Memory(
                     id=new_uuid(),
@@ -534,6 +536,7 @@ class ChronicleEngine:
                     context=None,
                 )
                 MemoryVersionRepository(session).create(version)
+                BranchMemberRepository(session).set(target_branch_id, memory.id, version.id)
                 session.flush()
                 _ = memory.versions
 
@@ -554,6 +557,7 @@ class ChronicleEngine:
                     context=None,
                 )
                 MemoryVersionRepository(session).create(version)
+                BranchMemberRepository(session).set(target_branch_id, memory_id, version.id)
 
             # action == "discard": no knowledge change
 

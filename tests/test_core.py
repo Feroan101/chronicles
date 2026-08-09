@@ -255,6 +255,35 @@ def test_process_observation_unknown_observation_raises(engine):
         engine.process_observation(observation_id="missing", action="discard")
 
 
+def test_process_observation_create_memory_registers_on_branch(engine):
+    project = engine.create_project(name="demo")
+    observation = engine.create_observation(project_id=project.id, content="branch knowledge")
+
+    engine.process_observation(observation_id=observation.id, action="create_memory")
+
+    branch = engine.get_current_branch(project.id)
+    knowledge = engine.get_branch_knowledge(branch.id)
+    assert len(knowledge) == 1
+    assert knowledge[0].version.content == "branch knowledge"
+    appearances = engine.list_memories(project_id=project.id, branch_id=branch.id)
+    assert len(appearances) == 1
+
+
+def test_process_observation_update_memory_registers_on_branch(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="original")
+    observation = engine.create_observation(project_id=project.id, content="updated on branch")
+
+    engine.process_observation(
+        observation_id=observation.id, action="update_memory", memory_id=memory.id
+    )
+
+    branch = engine.get_current_branch(project.id)
+    knowledge = engine.get_branch_knowledge(branch.id)
+    assert len(knowledge) == 1
+    assert knowledge[0].version.content == "updated on branch"
+
+
 # ------------------------------------------------------------------
 # Relationship tests
 # ------------------------------------------------------------------
