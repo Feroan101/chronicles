@@ -15,6 +15,7 @@ delegates every operation to ``ChronicleEngine`` and returns the shared
 Pydantic read models also used by the REST and MCP interfaces.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -22,6 +23,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
     ConfidenceRead,
+    DecayAssessmentRead,
+    DecayReportRead,
     DriftAffectedKnowledgeRead,
     DriftReportRead,
     EvidenceRead,
@@ -37,10 +40,13 @@ from chronicle.api.schemas import (
     VerificationResultRead,
 )
 from chronicle.core import (
+    DECAY_FRESH_DAYS,
+    DECAY_STALE_DAYS,
     ChronicleEngine,
     ChronicleError,
     ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
+    DecayConfigError,
     GitContext,
     GitContextError,
     InvalidObservationActionError,
@@ -452,6 +458,53 @@ class Chronicle:
             reasons=report.reasons,
         )
 
+    # ------------------------------------------------------------------
+    # Memory decay methods
+    # ------------------------------------------------------------------
+
+    def assess_decay(
+        self,
+        project_id: str,
+        at: datetime | None = None,
+        fresh_days: int = DECAY_FRESH_DAYS,
+        stale_days: int = DECAY_STALE_DAYS,
+    ) -> DecayReportRead:
+        """Assess the freshness (decay) of a project's knowledge.
+
+        Scores each memory's current version by how long ago it was updated.
+        A version is "fresh", "aging", or "stale". Read-only; never modifies
+        knowledge, confidence, or verification state.
+
+        ``at`` (a naive UTC datetime) pins the reference time for deterministic
+        assessment; it defaults to now. ``fresh_days`` and ``stale_days`` set
+        the freshness thresholds.
+        """
+        report = self._engine.assess_decay(
+            project_id=project_id,
+            at=at,
+            fresh_days=fresh_days,
+            stale_days=stale_days,
+        )
+        return DecayReportRead(
+            project_id=report.project_id,
+            assessments=[
+                DecayAssessmentRead(
+                    memory_id=assessment.memory_id,
+                    sequence=assessment.sequence,
+                    content=assessment.content,
+                    state=assessment.state,
+                    freshness=assessment.freshness,
+                    age_days=assessment.age_days,
+                    created_at=assessment.created_at,
+                )
+                for assessment in report.assessments
+            ],
+            generated_at=report.generated_at,
+            fresh_days=report.fresh_days,
+            stale_days=report.stale_days,
+            stale_count=report.stale_count,
+        )
+
 
 __all__ = [
     "Chronicle",
@@ -459,6 +512,9 @@ __all__ = [
     "ChronicleError",
     "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
+    "DecayAssessmentRead",
+    "DecayConfigError",
+    "DecayReportRead",
     "DriftAffectedKnowledgeRead",
     "DriftReportRead",
     "GitContext",

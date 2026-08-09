@@ -1,5 +1,6 @@
 import inspect
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from chronicle.api.schemas import (
     SearchHitRead,
 )
 from chronicle.core import (
+    DecayConfigError,
     MemoryNotFoundError,
     MemoryVersionNotFoundError,
     ProjectNotFoundError,
@@ -486,3 +488,85 @@ def test_detect_drift_read_only(chronicle: Chronicle, project_id: str, tmp_path:
     assert fetched.versions[0].content == "knowledge"
     confidence = chronicle.get_confidence(memory.id, 1)
     assert confidence.score == 0.7
+
+
+# --- memory decay -----------------------------------------------------------
+
+
+def test_assess_decay_fresh(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+
+    report = chronicle.assess_decay(project_id, at=memory.versions[0].created_at)
+
+    assert report.project_id == project_id
+    assert len(report.assessments) == 1
+    assessment = report.assessments[0]
+    assert assessment.memory_id == memory.id
+    assert assessment.state == "fresh"
+    assert assessment.freshness == 1.0
+    assert assessment.age_days == 0.0
+    assert report.stale_count == 0
+    assert report.__class__.__module__ == "chronicle.api.schemas"
+
+
+def test_assess_decay_aging_with_reference_time(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+
+    report = chronicle.assess_decay(
+        project_id, at=memory.versions[0].created_at + timedelta(days=60)
+    )
+
+    assert report.assessments[0].state == "aging"
+
+
+def test_assess_decay_stale_with_reference_time(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+
+    report = chronicle.assess_decay(
+        project_id, at=memory.versions[0].created_at + timedelta(days=200)
+    )
+
+    assert report.assessments[0].state == "stale"
+    assert report.stale_count == 1
+
+
+def test_assess_decay_unknown_project_raises(chronicle: Chronicle):
+    with pytest.raises(ProjectNotFoundError):
+        chronicle.assess_decay("missing")
+
+
+def test_assess_decay_invalid_config_raises(chronicle: Chronicle, project_id: str):
+    with pytest.raises(DecayConfigError):
+        chronicle.assess_decay(project_id, fresh_days=0)
+
+
+def test_assess_decay_read_only(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+    chronicle.record_confidence(memory.id, 1, 0.7)
+
+    chronicle.assess_decay(project_id)
+
+    fetched = chronicle.get_memory(memory.id)
+    assert fetched.versions[0].content == "knowledge"
+    confidence = chronicle.get_confidence(memory.id, 1)
+    assert confidence.score == 0.7
+
+
+def test_assess_decay_does_not_affect_drift(chronicle: Chronicle, project_id: str, tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    chronicle.create_memory(
+        project_id=project_id,
+        content="knowledge",
+        git_branch=_branch(repo),
+        git_commit=_head(repo),
+    )
+
+    before = chronicle.detect_drift(project_id, repo_path=str(repo))
+    chronicle.assess_decay(project_id)
+    after = chronicle.detect_drift(project_id, repo_path=str(repo))
+
+    assert after.state == before.state
+    assert after.changed_artifacts == before.changed_artifacts
+    assert [k.reason for k in after.affected_knowledge] == [
+        k.reason for k in before.affected_knowledge
+    ]

@@ -65,6 +65,7 @@ def test_application_startup_serves_docs_and_schema(client):
         "/memories/{memory_id}/versions/{sequence}/verify",
         "/snapshots/{snapshot_id}/verify",
         "/projects/{project_id}/drift",
+        "/projects/{project_id}/decay",
     }
 
 
@@ -930,6 +931,59 @@ def test_detect_drift_read_only(client, project_id, tmp_path):
     assert response.json()["state"] == "dirty"
 
     fetched = client.get(f"/memories/{memory['id']}").json()
+    assert fetched["versions"][0]["content"] == "knowledge"
+    confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence").json()
+    assert confidence["score"] == 0.7
+
+
+# --- decay endpoint ----------------------------------------------------------
+
+
+def test_assess_decay_fresh(client, project_id):
+    _create_memory(client, project_id, "knowledge")
+
+    response = client.post(f"/projects/{project_id}/decay")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_id"] == project_id
+    assert body["fresh_days"] == 30
+    assert body["stale_days"] == 180
+    assert body["stale_count"] == 0
+    assert len(body["assessments"]) == 1
+    assessment = body["assessments"][0]
+    assert assessment["state"] == "fresh"
+    assert assessment["freshness"] == pytest.approx(1.0)
+    assert assessment["age_days"] == pytest.approx(0.0, abs=1e-6)
+    assert assessment["sequence"] == 1
+    assert assessment["content"] == "knowledge"
+
+
+def test_assess_decay_unknown_project_returns_404(client):
+    response = client.post("/projects/missing/decay")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found: missing"}
+
+
+def test_assess_decay_empty_project(client, project_id):
+    response = client.post(f"/projects/{project_id}/decay")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assessments"] == []
+    assert body["stale_count"] == 0
+
+
+def test_assess_decay_read_only(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge", type="fact").json()
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.7},
+    )
+
+    response = client.post(f"/projects/{project_id}/decay")
+    assert response.status_code == 200
+
+    fetched = client.get(f"/memories/{memory['id']}").json()
+    assert fetched["type"] == "fact"
     assert fetched["versions"][0]["content"] == "knowledge"
     confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence").json()
     assert confidence["score"] == 0.7

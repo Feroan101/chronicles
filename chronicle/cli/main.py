@@ -1,6 +1,7 @@
 import typer
 
 from chronicle.cli.confidence import confidence_app
+from chronicle.cli.decay import decay
 from chronicle.cli.drift import drift
 from chronicle.cli.init import init_command
 from chronicle.cli.memory import memory_app
@@ -17,6 +18,7 @@ app = typer.Typer(help="Chronicle: the shared memory layer for AI software engin
 app.command("init")(init_command)
 app.command("search")(search_command)
 app.command("drift")(drift)
+app.command("decay")(decay)
 app.add_typer(project_app, name="project")
 app.add_typer(memory_app, name="memory")
 app.add_typer(version_app, name="version")

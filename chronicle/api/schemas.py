@@ -236,3 +236,27 @@ class DriftReportRead(BaseModel):
     changed_artifacts: list[str]
     affected_knowledge: list[DriftAffectedKnowledgeRead]
     reasons: list[str]
+
+
+# ------------------------------------------------------------------
+# Memory decay schemas
+# ------------------------------------------------------------------
+
+
+class DecayAssessmentRead(BaseModel):
+    memory_id: str
+    sequence: int
+    content: str
+    state: str
+    freshness: float
+    age_days: float
+    created_at: datetime
+
+
+class DecayReportRead(BaseModel):
+    project_id: str
+    assessments: list[DecayAssessmentRead]
+    generated_at: datetime
+    fresh_days: int
+    stale_days: int
+    stale_count: int

@@ -298,3 +298,47 @@ def test_drift_unknown_project_errors(project_dir: Path):
     result = runner.invoke(app, ["drift", "--project-id", "bad-id"])
     assert result.exit_code == 1
     assert "Project not found" in result.output
+
+
+# --- decay command -----------------------------------------------------------
+
+
+def test_decay_command(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+    _first_uuid(
+        runner.invoke(
+            app,
+            [
+                "memory",
+                "create",
+                "--project-id",
+                project_id,
+                "--content",
+                "knowledge",
+            ],
+        ).output
+    )
+
+    result = runner.invoke(app, ["decay", "--project-id", project_id])
+    assert result.exit_code == 0, result.output
+    assert f"Decay [project {project_id}]" in result.output
+    assert "FRESH" in result.output
+    assert "stale: 0" in result.output
+
+
+def test_decay_empty_project(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+
+    result = runner.invoke(app, ["decay", "--project-id", project_id])
+    assert result.exit_code == 0, result.output
+    assert "0 assessment(s)" in result.output
+
+
+def test_decay_unknown_project_errors(project_dir: Path):
+    _init(project_dir)
+
+    result = runner.invoke(app, ["decay", "--project-id", "bad-id"])
+    assert result.exit_code == 1
+    assert "Project not found" in result.output

@@ -89,6 +89,7 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "verify_version",
             "verify_snapshot",
             "detect_drift",
+            "assess_decay",
         }
 
 
@@ -102,6 +103,7 @@ async def test_tool_input_schemas(server_dir):
         assert set(tools["get_project"]["required"]) == {"project_id"}
         assert set(tools["search"]["required"]) == {"query"}
         assert set(tools["detect_drift"]["required"]) == {"project_id"}
+        assert set(tools["assess_decay"]["required"]) == {"project_id"}
 
 
 @pytest.mark.anyio
@@ -728,4 +730,44 @@ async def test_detect_drift_dirty(server_dir):
 async def test_detect_drift_unknown_project_errors(server_dir):
     async with _session(server_dir) as session:
         message = await _err(session, "detect_drift", {"project_id": "missing"})
+        assert "Project not found: missing" in message
+
+
+@pytest.mark.anyio
+async def test_assess_decay_fresh(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "knowledge"},
+        )
+
+        report = await _ok(session, "assess_decay", {"project_id": project["id"]})
+
+        assert report["project_id"] == project["id"]
+        assert report["stale_count"] == 0
+        assert len(report["assessments"]) == 1
+        assessment = report["assessments"][0]
+        assert assessment["state"] == "fresh"
+        assert assessment["freshness"] == pytest.approx(1.0)
+        assert assessment["sequence"] == 1
+        assert assessment["content"] == "knowledge"
+
+
+@pytest.mark.anyio
+async def test_assess_decay_empty_project(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+
+        report = await _ok(session, "assess_decay", {"project_id": project["id"]})
+
+        assert report["assessments"] == []
+        assert report["stale_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_assess_decay_unknown_project_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "assess_decay", {"project_id": "missing"})
         assert "Project not found: missing" in message

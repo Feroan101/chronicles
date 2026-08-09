@@ -1,4 +1,5 @@
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from chronicle.core import (
     ChronicleEngine,
     ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
+    DecayConfigError,
     InvalidObservationActionError,
     MemoryNotFoundError,
     MemoryVersionNotFoundError,
@@ -1194,3 +1196,274 @@ def test_detect_drift_does_not_affect_verification(engine, tmp_path):
 
     assert after.passed == before.passed
     assert [r.outcome for r in after.results] == [r.outcome for r in before.results]
+
+
+# ------------------------------------------------------------------
+# Memory decay tests
+# ------------------------------------------------------------------
+
+
+def test_assess_decay_fresh(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.assess_decay(project_id=project.id, at=memory.versions[0].created_at)
+
+    assert report.project_id == project.id
+    assert report.generated_at is not None
+    assert report.fresh_days == 30
+    assert report.stale_days == 180
+    assert len(report.assessments) == 1
+    assessment = report.assessments[0]
+    assert assessment.memory_id == memory.id
+    assert assessment.sequence == 1
+    assert assessment.content == "knowledge"
+    assert assessment.fresh
+    assert not assessment.aging
+    assert not assessment.stale
+    assert assessment.state == "fresh"
+    assert assessment.freshness == 1.0
+    assert assessment.age_days == 0.0
+    assert report.stale_count == 0
+
+
+def test_assess_decay_aging(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.assess_decay(
+        project_id=project.id,
+        at=memory.versions[0].created_at + timedelta(days=60),
+    )
+
+    assessment = report.assessments[0]
+    assert assessment.state == "aging"
+    assert assessment.aging
+    assert not assessment.fresh
+    assert not assessment.stale
+
+
+def test_assess_decay_stale(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.assess_decay(
+        project_id=project.id,
+        at=memory.versions[0].created_at + timedelta(days=200),
+    )
+
+    assessment = report.assessments[0]
+    assert assessment.state == "stale"
+    assert assessment.stale
+    assert assessment.freshness == 0.0
+    assert report.stale_count == 1
+
+
+def test_assess_decay_freshness_is_linear(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.assess_decay(
+        project_id=project.id,
+        at=memory.versions[0].created_at + timedelta(days=90),
+    )
+
+    assert report.assessments[0].freshness == pytest.approx(0.5)
+    assert report.assessments[0].age_days == pytest.approx(90.0)
+
+
+def test_assess_decay_fresh_boundary(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    created = memory.versions[0].created_at
+
+    just_under = engine.assess_decay(
+        project_id=project.id, at=created + timedelta(days=29, seconds=86399)
+    )
+    assert just_under.assessments[0].fresh
+
+    at_threshold = engine.assess_decay(project_id=project.id, at=created + timedelta(days=30))
+    assert at_threshold.assessments[0].aging
+
+
+def test_assess_decay_stale_boundary(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    created = memory.versions[0].created_at
+
+    just_under = engine.assess_decay(
+        project_id=project.id, at=created + timedelta(days=179, seconds=86399)
+    )
+    assert just_under.assessments[0].aging
+
+    at_threshold = engine.assess_decay(project_id=project.id, at=created + timedelta(days=180))
+    assert at_threshold.assessments[0].stale
+    assert at_threshold.assessments[0].freshness == 0.0
+
+
+def test_assess_decay_all_states_across_time(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    created = memory.versions[0].created_at
+
+    fresh = engine.assess_decay(project_id=project.id, at=created + timedelta(days=10))
+    aging = engine.assess_decay(project_id=project.id, at=created + timedelta(days=60))
+    stale = engine.assess_decay(project_id=project.id, at=created + timedelta(days=300))
+
+    assert fresh.assessments[0].state == "fresh"
+    assert aging.assessments[0].state == "aging"
+    assert stale.assessments[0].state == "stale"
+
+
+def test_assess_decay_assesses_current_version_only(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="v1")
+    version2 = engine.create_version(memory_id=memory.id, content="v2")
+
+    report = engine.assess_decay(project_id=project.id)
+
+    assert len(report.assessments) == 1
+    assessment = report.assessments[0]
+    assert assessment.sequence == 2
+    assert assessment.content == "v2"
+    assert assessment.created_at == version2.created_at
+
+
+def test_assess_decay_multiple_memories(engine):
+    from chronicle.models import MemoryVersion
+    from chronicle.utils.time import utcnow
+    from sqlalchemy import update
+
+    project = engine.create_project(name="demo")
+    fresh_memory = engine.create_memory(project_id=project.id, content="fresh")
+    old_memory = engine.create_memory(project_id=project.id, content="old")
+
+    with engine._transaction() as session:
+        session.execute(
+            update(MemoryVersion)
+            .where(MemoryVersion.memory_id == old_memory.id)
+            .values(created_at=utcnow() - timedelta(days=200))
+        )
+
+    report = engine.assess_decay(project_id=project.id)
+
+    states = {a.memory_id: a.state for a in report.assessments}
+    assert states[fresh_memory.id] == "fresh"
+    assert states[old_memory.id] == "stale"
+
+
+def test_assess_decay_empty_project(engine):
+    project = engine.create_project(name="empty")
+
+    report = engine.assess_decay(project_id=project.id)
+
+    assert report.assessments == []
+    assert report.stale_count == 0
+
+
+def test_assess_decay_reference_before_creation_is_fresh(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    created = memory.versions[0].created_at
+
+    report = engine.assess_decay(project_id=project.id, at=created - timedelta(days=10))
+
+    assessment = report.assessments[0]
+    assert assessment.fresh
+    assert assessment.freshness == 1.0
+    assert assessment.age_days == 0.0
+
+
+def test_assess_decay_accepts_timezone_aware_reference(engine):
+    from datetime import UTC, datetime
+
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    created = memory.versions[0].created_at
+    aware = datetime.combine(created.date(), created.time(), tzinfo=UTC) + timedelta(days=60)
+
+    report = engine.assess_decay(project_id=project.id, at=aware)
+
+    assert report.assessments[0].aging
+
+
+def test_assess_decay_deterministic(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    at = memory.versions[0].created_at + timedelta(days=90)
+
+    first = engine.assess_decay(project_id=project.id, at=at)
+    second = engine.assess_decay(project_id=project.id, at=at)
+
+    assert first == second
+
+
+def test_assess_decay_unknown_project_raises(engine):
+    with pytest.raises(ProjectNotFoundError):
+        engine.assess_decay(project_id="missing")
+
+
+def test_assess_decay_invalid_config_raises(engine):
+    project = engine.create_project(name="demo")
+
+    with pytest.raises(DecayConfigError):
+        engine.assess_decay(project_id=project.id, fresh_days=0)
+
+    with pytest.raises(DecayConfigError):
+        engine.assess_decay(project_id=project.id, stale_days=-1)
+
+    with pytest.raises(DecayConfigError):
+        engine.assess_decay(project_id=project.id, fresh_days=100, stale_days=50)
+
+
+def test_assess_decay_read_only(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(
+        project_id=project.id, content="knowledge", type="fact", context="ctx"
+    )
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.8)
+
+    engine.assess_decay(project_id=project.id)
+
+    fetched = engine.get_memory(memory.id)
+    assert fetched.type == "fact"
+    assert len(fetched.versions) == 1
+    assert fetched.versions[0].content == "knowledge"
+    assert fetched.versions[0].context == "ctx"
+    confidence = engine.get_confidence(memory_id=memory.id, sequence=1)
+    assert confidence is not None
+    assert confidence.score == 0.8
+
+
+def test_assess_decay_does_not_affect_verification(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge", type="fact")
+
+    before = engine.verify_project(project_id=project.id)
+    engine.assess_decay(project_id=project.id)
+    after = engine.verify_project(project_id=project.id)
+
+    assert after.passed == before.passed
+    assert [r.outcome for r in after.results] == [r.outcome for r in before.results]
+
+
+def test_assess_decay_does_not_affect_drift(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo), branch=_branch(repo)),
+    )
+
+    before = engine.detect_drift(project_id=project.id, repo_path=repo)
+    engine.assess_decay(project_id=project.id)
+    after = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert after.state == before.state
+    assert after.changed_artifacts == before.changed_artifacts
+    assert [k.reason for k in after.affected_knowledge] == [
+        k.reason for k in before.affected_knowledge
+    ]

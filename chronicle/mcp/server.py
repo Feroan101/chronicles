@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
     ConfidenceRead,
+    DecayAssessmentRead,
+    DecayReportRead,
     DriftAffectedKnowledgeRead,
     DriftReportRead,
     EvidenceRead,
@@ -543,6 +545,42 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
                 for k in report.affected_knowledge
             ],
             reasons=report.reasons,
+        ).model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Memory decay tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def assess_decay(project_id: str) -> dict:
+        """Assess the freshness (decay) of a project's knowledge.
+
+        Scores each memory's current version by how long ago it was updated.
+        A version is "fresh", "aging", or "stale". Read-only; never modifies
+        knowledge, confidence, or verification state.
+
+        Args:
+            project_id: The project ID.
+        """
+        report = engine.assess_decay(project_id=project_id)
+        return DecayReportRead(
+            project_id=report.project_id,
+            assessments=[
+                DecayAssessmentRead(
+                    memory_id=assessment.memory_id,
+                    sequence=assessment.sequence,
+                    content=assessment.content,
+                    state=assessment.state,
+                    freshness=assessment.freshness,
+                    age_days=assessment.age_days,
+                    created_at=assessment.created_at,
+                )
+                for assessment in report.assessments
+            ],
+            generated_at=report.generated_at,
+            fresh_days=report.fresh_days,
+            stale_days=report.stale_days,
+            stale_count=report.stale_count,
         ).model_dump(mode="json")
 
     return server

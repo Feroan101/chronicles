@@ -88,3 +88,8 @@ class ConfidenceScoreRangeError(ChronicleError):
     def __init__(self, score: float) -> None:
         super().__init__(f"Confidence score must be between 0.0 and 1.0, got {score}")
         self.score = score
+
+
+class DecayConfigError(ChronicleError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)

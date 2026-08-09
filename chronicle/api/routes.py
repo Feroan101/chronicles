@@ -4,6 +4,8 @@ from chronicle.api.deps import Engine
 from chronicle.api.schemas import (
     ConfidenceRead,
     ConfidenceRecord,
+    DecayAssessmentRead,
+    DecayReportRead,
     DriftAffectedKnowledgeRead,
     DriftReportRead,
     EvidenceRead,
@@ -372,3 +374,38 @@ def detect_drift(
     repo_path: str | None = Query(default=None),
 ) -> DriftReportRead:
     return _drift_report(engine.detect_drift(project_id=project_id, repo_path=repo_path))
+
+
+# ------------------------------------------------------------------
+# Memory decay endpoints
+# ------------------------------------------------------------------
+
+
+def _decay_report(report) -> DecayReportRead:
+    return DecayReportRead(
+        project_id=report.project_id,
+        assessments=[
+            DecayAssessmentRead(
+                memory_id=assessment.memory_id,
+                sequence=assessment.sequence,
+                content=assessment.content,
+                state=assessment.state,
+                freshness=assessment.freshness,
+                age_days=assessment.age_days,
+                created_at=assessment.created_at,
+            )
+            for assessment in report.assessments
+        ],
+        generated_at=report.generated_at,
+        fresh_days=report.fresh_days,
+        stale_days=report.stale_days,
+        stale_count=report.stale_count,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/decay",
+    response_model=DecayReportRead,
+)
+def assess_decay(project_id: str, engine: Engine) -> DecayReportRead:
+    return _decay_report(engine.assess_decay(project_id=project_id))

@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.exc import OperationalError
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from chronicle.core.errors import (
     ConfidenceScoreRangeError,
     CrossProjectRelationshipError,
+    DecayConfigError,
     InvalidObservationActionError,
     MemoryNotFoundError,
     MemoryVersionNotFoundError,
@@ -119,6 +121,63 @@ class DriftReport:
     @property
     def dirty(self) -> bool:
         return self.state == "dirty"
+
+
+DECAY_FRESH_DAYS = 30
+DECAY_STALE_DAYS = 180
+
+
+@dataclass(frozen=True)
+class DecayAssessment:
+    """Freshness assessment for a Memory's current Version.
+
+    Decay represents knowledge freshness, not truth: a knowledge item may
+    have high confidence but low freshness. ``state`` is "fresh", "aging",
+    or "stale"; ``freshness`` is a linear score from 1.0 (just updated) down
+    to 0.0 once the Version reaches the stale threshold. Age is measured from
+    the Version's ``created_at`` timestamp; nothing is mutated or persisted.
+    """
+
+    memory_id: str
+    sequence: int
+    content: str
+    state: str  # "fresh", "aging", or "stale"
+    freshness: float  # 0.0 to 1.0
+    age_days: float
+    created_at: datetime
+
+    @property
+    def fresh(self) -> bool:
+        return self.state == "fresh"
+
+    @property
+    def aging(self) -> bool:
+        return self.state == "aging"
+
+    @property
+    def stale(self) -> bool:
+        return self.state == "stale"
+
+
+@dataclass(frozen=True)
+class DecayReport:
+    """Report produced by a decay assessment run."""
+
+    project_id: str
+    assessments: list[DecayAssessment] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=utcnow)
+    fresh_days: int = DECAY_FRESH_DAYS
+    stale_days: int = DECAY_STALE_DAYS
+
+    @property
+    def stale_count(self) -> int:
+        return sum(1 for assessment in self.assessments if assessment.stale)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
 
 
 class ChronicleEngine:
@@ -953,3 +1012,76 @@ class ChronicleEngine:
             if evidence.ref in changed:
                 return f"evidence reference {evidence.ref} has changed in the working tree"
         return None
+
+    # ------------------------------------------------------------------
+    # Memory decay operations
+    # ------------------------------------------------------------------
+
+    def assess_decay(
+        self,
+        project_id: str,
+        at: datetime | None = None,
+        fresh_days: int = DECAY_FRESH_DAYS,
+        stale_days: int = DECAY_STALE_DAYS,
+    ) -> DecayReport:
+        """Assess the freshness (decay) of a Project's current knowledge.
+
+        Each Memory's current Version is scored purely from its ``created_at``
+        timestamp relative to the reference time ``at`` (default: now).
+        Freshness is a linear score from 1.0 down to 0.0 as the Version ages
+        toward ``stale_days``. A Version is "fresh" while its age is below
+        ``fresh_days``, "aging" between the thresholds, and "stale" once it
+        reaches ``stale_days``. The operation is read-only: it never deletes,
+        mutates, or re-verifies knowledge, never changes confidence, and never
+        runs drift detection. Results are deterministic for identical inputs.
+        """
+        if fresh_days <= 0 or stale_days <= 0:
+            raise DecayConfigError(
+                f"fresh_days and stale_days must be positive, got fresh_days={fresh_days}, "
+                f"stale_days={stale_days}"
+            )
+        if fresh_days > stale_days:
+            raise DecayConfigError(
+                f"fresh_days must not exceed stale_days, got fresh_days={fresh_days}, "
+                f"stale_days={stale_days}"
+            )
+
+        now = _naive_utc(at) if at is not None else utcnow()
+
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+
+            assessments: list[DecayAssessment] = []
+            for memory in MemoryRepository(session).list_by_project(project_id):
+                current = MemoryVersionRepository(session).highest_version(memory.id)
+                if current is None:
+                    continue
+                created_at = _naive_utc(current.created_at)
+                age_days = max(0.0, (now - created_at).total_seconds()) / 86400.0
+                freshness = max(0.0, 1.0 - age_days / stale_days)
+                if age_days < fresh_days:
+                    state = "fresh"
+                elif age_days < stale_days:
+                    state = "aging"
+                else:
+                    state = "stale"
+                assessments.append(
+                    DecayAssessment(
+                        memory_id=memory.id,
+                        sequence=current.sequence,
+                        content=current.content,
+                        state=state,
+                        freshness=freshness,
+                        age_days=age_days,
+                        created_at=created_at,
+                    )
+                )
+
+            return DecayReport(
+                project_id=project_id,
+                assessments=assessments,
+                generated_at=now,
+                fresh_days=fresh_days,
+                stale_days=stale_days,
+            )
