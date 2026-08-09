@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 from alembic import op
-
 from chronicle.utils.time import utcnow
 
 # revision identifiers, used by Alembic.
@@ -96,11 +95,17 @@ def upgrade() -> None:
                 "INSERT INTO branches (id, project_id, name, is_default, created_at) "
                 "VALUES (:id, :project_id, :name, 1, :created_at)"
             ),
-            {"id": branch_id, "project_id": project_id, "name": DEFAULT_BRANCH_NAME, "created_at": created_at},
+            {
+                "id": branch_id,
+                "project_id": project_id,
+                "name": DEFAULT_BRANCH_NAME,
+                "created_at": created_at,
+            },
         )
         connection.execute(
             sa.text(
-                "UPDATE projects SET default_branch_id = :branch_id, current_branch_id = :branch_id "
+                "UPDATE projects SET default_branch_id = :branch_id, "
+                "current_branch_id = :branch_id "
                 "WHERE id = :project_id"
             ),
             {"branch_id": branch_id, "project_id": project_id},
