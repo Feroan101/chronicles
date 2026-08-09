@@ -1,3 +1,6 @@
+import subprocess
+from pathlib import Path
+
 import pytest
 from chronicle.core import (
     ChronicleEngine,
@@ -929,3 +932,265 @@ def test_verification_does_not_modify_confidence(engine):
     confidence = engine.get_confidence(memory_id=memory.id, sequence=1)
     assert confidence is not None
     assert confidence.score == 0.8
+
+
+# ------------------------------------------------------------------
+# Drift detection tests
+# ------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str):
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _init_repo(repo: Path) -> Path:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Chronicle Test")
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('hi')\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _branch(repo: Path) -> str:
+    return _git(repo, "branch", "--show-current").stdout.strip()
+
+
+def _add_evidence(engine, memory, evidence_type: str, ref: str) -> None:
+    from chronicle.models import Evidence
+    from chronicle.storage import EvidenceRepository
+    from chronicle.utils.ids import new_uuid
+    from chronicle.utils.time import utcnow
+
+    with engine._transaction() as session:
+        EvidenceRepository(session).create(
+            Evidence(
+                id=new_uuid(),
+                memory_version_id=memory.versions[0].id,
+                evidence_type=evidence_type,
+                ref=ref,
+                recorded_at=utcnow(),
+            )
+        )
+
+
+def test_detect_drift_clean(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo), branch=_branch(repo)),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.project_id == project.id
+    assert report.clean
+    assert report.state == "clean"
+    assert report.changed_artifacts == []
+    assert report.affected_knowledge == []
+
+
+def test_detect_drift_abbreviated_commit_matches(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo)[:7]),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.clean
+    assert report.affected_knowledge == []
+
+
+def test_detect_drift_dirty_unrelated_changes(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo)),
+    )
+
+    (repo / "README.md").write_text("readme")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert report.changed_artifacts == ["README.md"]
+    assert report.affected_knowledge == []
+
+
+def test_detect_drift_dirty_evidence_relevant(engine, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="uses main module")
+    _add_evidence(engine, memory, "file", "src/main.py")
+
+    (repo / "src" / "main.py").write_text("print('bye')\n")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert "src/main.py" in report.changed_artifacts
+    assert len(report.affected_knowledge) == 1
+    knowledge = report.affected_knowledge[0]
+    assert knowledge.memory_id == memory.id
+    assert knowledge.sequence == 1
+    assert knowledge.content == "uses main module"
+    assert "src/main.py" in knowledge.reason
+
+
+def test_detect_drift_multiple_affected(engine, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "src" / "util.py").write_text("def helper():\n    pass\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "add util")
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    _add_evidence(engine, mem_a, "file", "src/main.py")
+    _add_evidence(engine, mem_b, "file", "src/util.py")
+
+    (repo / "src" / "main.py").write_text("print('changed a')\n")
+    (repo / "src" / "util.py").write_text("def helper():\n    return 1\n")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert len(report.affected_knowledge) == 2
+    affected_ids = {k.memory_id for k in report.affected_knowledge}
+    assert affected_ids == {mem_a.id, mem_b.id}
+
+
+def test_detect_drift_commit_mismatch_affected(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit="deadbeef"),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert report.changed_artifacts == []
+    assert len(report.affected_knowledge) == 1
+    assert "recorded commit" in report.affected_knowledge[0].reason
+
+
+def test_detect_drift_branch_mismatch_affected(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(branch="feature"),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert len(report.affected_knowledge) == 1
+    assert "recorded branch" in report.affected_knowledge[0].reason
+
+
+def test_detect_drift_no_git_context(engine, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.clean
+    assert report.changed_artifacts == []
+    assert report.affected_knowledge == []
+    assert any("no Git context" in reason for reason in report.reasons)
+
+
+def test_detect_drift_not_a_repo(engine, tmp_path):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=tmp_path / "empty")
+
+    assert report.clean
+    assert any("not in a Git repository" in reason for reason in report.reasons)
+
+
+def test_detect_drift_unknown_project_raises(engine):
+    with pytest.raises(ProjectNotFoundError):
+        engine.detect_drift(project_id="missing")
+
+
+def test_detect_drift_read_only(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        type="fact",
+        git_context=GitContext(commit=_head(repo)),
+    )
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.8)
+
+    (repo / "README.md").write_text("readme")
+    engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    fetched = engine.get_memory(memory.id)
+    assert fetched.type == "fact"
+    assert len(fetched.versions) == 1
+    assert fetched.versions[0].content == "knowledge"
+    confidence = engine.get_confidence(memory_id=memory.id, sequence=1)
+    assert confidence is not None
+    assert confidence.score == 0.8
+
+
+def test_detect_drift_does_not_affect_verification(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        type="fact",
+        git_context=GitContext(commit=_head(repo)),
+    )
+
+    before = engine.verify_project(project_id=project.id)
+    engine.detect_drift(project_id=project.id, repo_path=repo)
+    after = engine.verify_project(project_id=project.id)
+
+    assert after.passed == before.passed
+    assert [r.outcome for r in after.results] == [r.outcome for r in before.results]

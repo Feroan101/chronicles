@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -19,7 +20,7 @@ from chronicle.core.errors import (
     SelfRelationshipError,
     SnapshotNotFoundError,
 )
-from chronicle.core.git import GitContext
+from chronicle.core.git import GitContext, GitTree, read_git_tree
 from chronicle.models import (
     ConfidenceScore,
     Evidence,
@@ -83,6 +84,41 @@ class VerificationReport:
     @property
     def has_failures(self) -> bool:
         return any(r.outcome == "failed" for r in self.results)
+
+
+@dataclass(frozen=True)
+class DriftAffectedKnowledge:
+    """Knowledge whose supporting evidence overlaps a detected change."""
+
+    memory_id: str
+    sequence: int
+    content: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DriftReport:
+    """Report produced by a drift detection run.
+
+    ``state`` is "clean" or "dirty". A dirty tree means the current project
+    state differs from the evidence reference state. Affected knowledge is
+    knowledge whose evidence overlaps those changes; the report never claims
+    that such knowledge is stale.
+    """
+
+    project_id: str
+    state: str  # "clean" or "dirty"
+    changed_artifacts: list[str] = field(default_factory=list)
+    affected_knowledge: list[DriftAffectedKnowledge] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+
+    @property
+    def clean(self) -> bool:
+        return self.state == "clean"
+
+    @property
+    def dirty(self) -> bool:
+        return self.state == "dirty"
 
 
 class ChronicleEngine:
@@ -813,3 +849,107 @@ class ChronicleEngine:
             )
 
         return results
+
+    # ------------------------------------------------------------------
+    # Drift detection operations
+    # ------------------------------------------------------------------
+
+    def detect_drift(
+        self,
+        project_id: str,
+        repo_path: str | Path | None = None,
+    ) -> DriftReport:
+        """Detect whether a Project's knowledge may have drifted.
+
+        The current Git state (branch, HEAD, and working-tree changes) is
+        compared against the evidence recorded for each Memory's current
+        Version. A dirty tree means the project state differs from the recorded
+        reference; affected knowledge is knowledge whose evidence overlaps the
+        detected changes. The operation is read-only and never modifies
+        knowledge or confidence.
+        """
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+
+            tree = read_git_tree(repo_path)
+            if not tree.is_repo:
+                return DriftReport(
+                    project_id=project_id,
+                    state="clean",
+                    reasons=["not in a Git repository — drift cannot be detected"],
+                )
+
+            changed = set(tree.changed_files)
+            has_reference = False
+            affected: list[DriftAffectedKnowledge] = []
+            for memory in MemoryRepository(session).list_by_project(project_id):
+                current = MemoryVersionRepository(session).highest_version(memory.id)
+                if current is None:
+                    continue
+                for evidence in current.evidence:
+                    if evidence.evidence_type != "description":
+                        has_reference = True
+                    reason = self._evidence_drift_reason(evidence, tree, changed)
+                    if reason is None:
+                        continue
+                    affected.append(
+                        DriftAffectedKnowledge(
+                            memory_id=memory.id,
+                            sequence=current.sequence,
+                            content=current.content,
+                            reason=reason,
+                        )
+                    )
+
+            if not has_reference:
+                return DriftReport(
+                    project_id=project_id,
+                    state="clean",
+                    reasons=[
+                        "no Git context recorded for any knowledge in this project — "
+                        "nothing to compare against"
+                    ],
+                )
+
+            reasons: list[str] = []
+            if changed:
+                reasons.append(f"{len(changed)} changed artifact(s) in the working tree")
+            for knowledge in affected:
+                reasons.append(f"memory {knowledge.memory_id} v{knowledge.sequence} may be stale")
+
+            state = "dirty" if changed or affected else "clean"
+            return DriftReport(
+                project_id=project_id,
+                state=state,
+                changed_artifacts=sorted(changed),
+                affected_knowledge=affected,
+                reasons=reasons,
+            )
+
+    @staticmethod
+    def _evidence_drift_reason(
+        evidence: Evidence,
+        tree: GitTree,
+        changed: set[str],
+    ) -> str | None:
+        """Return a reason when an Evidence reference no longer matches the tree."""
+        if evidence.evidence_type == "commit":
+            if tree.head_commit is None or not (
+                tree.head_commit.startswith(evidence.ref)
+                or evidence.ref.startswith(tree.head_commit)
+            ):
+                return (
+                    f"recorded commit {evidence.ref} does not match current HEAD "
+                    f"{tree.head_commit or '(none)'}"
+                )
+        elif evidence.evidence_type == "branch":
+            if tree.current_branch is not None and evidence.ref != tree.current_branch:
+                return (
+                    f"recorded branch {evidence.ref} does not match current branch "
+                    f"{tree.current_branch}"
+                )
+        else:
+            if evidence.ref in changed:
+                return f"evidence reference {evidence.ref} has changed in the working tree"
+        return None

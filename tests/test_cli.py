@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -224,3 +225,76 @@ def test_verify_unknown_errors(project_dir: Path):
     )
     assert bad_version.exit_code == 1
     assert "Memory not found" in bad_version.output
+
+
+# --- drift command --------------------------------------------------------
+
+
+def _git(repo: Path, *args: str):
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _init_repo(repo: Path) -> Path:
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Chronicle Test")
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('hi')\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _branch(repo: Path) -> str:
+    return _git(repo, "branch", "--show-current").stdout.strip()
+
+
+def test_drift_command(project_dir: Path):
+    _init(project_dir)
+    (project_dir / ".gitignore").write_text(".chronicle/\n")
+    _init_repo(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+    _first_uuid(
+        runner.invoke(
+            app,
+            [
+                "memory",
+                "create",
+                "--project-id",
+                project_id,
+                "--content",
+                "knowledge",
+                "--git-commit",
+                _head(project_dir),
+                "--git-branch",
+                _branch(project_dir),
+            ],
+        ).output
+    )
+
+    clean = runner.invoke(app, ["drift", "--project-id", project_id])
+    assert clean.exit_code == 0, clean.output
+    assert "CLEAN" in clean.output
+
+    (project_dir / "README.md").write_text("readme")
+    dirty = runner.invoke(app, ["drift", "--project-id", project_id])
+    assert dirty.exit_code == 0, dirty.output
+    assert "DIRTY" in dirty.output
+
+
+def test_drift_unknown_project_errors(project_dir: Path):
+    _init(project_dir)
+
+    result = runner.invoke(app, ["drift", "--project-id", "bad-id"])
+    assert result.exit_code == 1
+    assert "Project not found" in result.output

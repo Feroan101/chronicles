@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,7 @@ def test_application_startup_serves_docs_and_schema(client):
         "/memories/{memory_id}/verify",
         "/memories/{memory_id}/versions/{sequence}/verify",
         "/snapshots/{snapshot_id}/verify",
+        "/projects/{project_id}/drift",
     }
 
 
@@ -836,3 +838,98 @@ def test_verify_does_not_modify_confidence(client, project_id):
 
     confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence")
     assert confidence.json()["score"] == 0.7
+
+
+# ------------------------------------------------------------------
+# Drift detection API tests
+# ------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str):
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _init_repo(repo: Path) -> Path:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Chronicle Test")
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('hi')\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _branch(repo: Path) -> str:
+    return _git(repo, "branch", "--show-current").stdout.strip()
+
+
+def test_detect_drift_clean(client, project_id, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _create_memory(
+        client,
+        project_id,
+        "knowledge",
+        git_context={"commit": _head(repo), "branch": _branch(repo)},
+    )
+
+    response = client.post(f"/projects/{project_id}/drift", params={"repo_path": str(repo)})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_id"] == project_id
+    assert body["state"] == "clean"
+    assert body["changed_artifacts"] == []
+    assert body["affected_knowledge"] == []
+
+
+def test_detect_drift_dirty(client, project_id, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _create_memory(client, project_id, "knowledge", git_context={"commit": "deadbeef"})
+
+    response = client.post(f"/projects/{project_id}/drift", params={"repo_path": str(repo)})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["state"] == "dirty"
+    assert len(body["affected_knowledge"]) == 1
+    assert "recorded commit" in body["affected_knowledge"][0]["reason"]
+
+
+def test_detect_drift_unknown_project_returns_404(client):
+    response = client.post("/projects/missing/drift")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found: missing"}
+
+
+def test_detect_drift_read_only(client, project_id, tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    memory = _create_memory(
+        client,
+        project_id,
+        "knowledge",
+        git_context={"commit": _head(repo)},
+    ).json()
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.7},
+    )
+
+    (repo / "README.md").write_text("readme")
+    response = client.post(f"/projects/{project_id}/drift", params={"repo_path": str(repo)})
+    assert response.status_code == 200
+    assert response.json()["state"] == "dirty"
+
+    fetched = client.get(f"/memories/{memory['id']}").json()
+    assert fetched["versions"][0]["content"] == "knowledge"
+    confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence").json()
+    assert confidence["score"] == 0.7

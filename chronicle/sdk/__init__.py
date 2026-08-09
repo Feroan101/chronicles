@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
     ConfidenceRead,
+    DriftAffectedKnowledgeRead,
+    DriftReportRead,
     EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
@@ -419,6 +421,37 @@ class Chronicle:
             has_failures=report.has_failures,
         )
 
+    # ------------------------------------------------------------------
+    # Drift detection methods
+    # ------------------------------------------------------------------
+
+    def detect_drift(
+        self,
+        project_id: str,
+        repo_path: str | Path | None = None,
+    ) -> DriftReportRead:
+        """Detect whether a project's knowledge may have drifted.
+
+        Compares the current Git state against the evidence recorded for the
+        project's knowledge. Read-only; never modifies knowledge.
+        """
+        report = self._engine.detect_drift(project_id=project_id, repo_path=repo_path)
+        return DriftReportRead(
+            project_id=report.project_id,
+            state=report.state,
+            changed_artifacts=report.changed_artifacts,
+            affected_knowledge=[
+                DriftAffectedKnowledgeRead(
+                    memory_id=k.memory_id,
+                    sequence=k.sequence,
+                    content=k.content,
+                    reason=k.reason,
+                )
+                for k in report.affected_knowledge
+            ],
+            reasons=report.reasons,
+        )
+
 
 __all__ = [
     "Chronicle",
@@ -426,6 +459,8 @@ __all__ = [
     "ChronicleError",
     "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
+    "DriftAffectedKnowledgeRead",
+    "DriftReportRead",
     "GitContext",
     "GitContextError",
     "InvalidObservationActionError",

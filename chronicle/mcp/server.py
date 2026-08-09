@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from chronicle.api.schemas import (
     ConfidenceRead,
+    DriftAffectedKnowledgeRead,
+    DriftReportRead,
     EvidenceRead,
     MemoryRead,
     MemorySummaryRead,
@@ -509,6 +511,38 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             ],
             passed=report.passed,
             has_failures=report.has_failures,
+        ).model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Drift detection tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def detect_drift(project_id: str, repo_path: str | None = None) -> dict:
+        """Detect whether a project's knowledge may have drifted.
+
+        Compares the current Git state against the evidence recorded for the
+        project's knowledge. Read-only; never modifies knowledge.
+
+        Args:
+            project_id: The project ID.
+            repo_path: Optional path to the Git repository to check.
+        """
+        report = engine.detect_drift(project_id=project_id, repo_path=repo_path)
+        return DriftReportRead(
+            project_id=report.project_id,
+            state=report.state,
+            changed_artifacts=report.changed_artifacts,
+            affected_knowledge=[
+                DriftAffectedKnowledgeRead(
+                    memory_id=k.memory_id,
+                    sequence=k.sequence,
+                    content=k.content,
+                    reason=k.reason,
+                )
+                for k in report.affected_knowledge
+            ],
+            reasons=report.reasons,
         ).model_dump(mode="json")
 
     return server

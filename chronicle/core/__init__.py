@@ -1,5 +1,7 @@
 from chronicle.core.engine import (
     ChronicleEngine,
+    DriftAffectedKnowledge,
+    DriftReport,
     SearchResult,
     VerificationReport,
     VerificationResult,
@@ -27,6 +29,8 @@ __all__ = [
     "ChronicleError",
     "ConfidenceScoreRangeError",
     "CrossProjectRelationshipError",
+    "DriftAffectedKnowledge",
+    "DriftReport",
     "GitContext",
     "GitContextError",
     "InvalidObservationActionError",

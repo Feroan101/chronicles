@@ -1,4 +1,5 @@
 import inspect
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -400,5 +401,88 @@ def test_verify_does_not_modify_confidence(chronicle: Chronicle, project_id: str
 
     chronicle.verify_project(project_id)
 
+    confidence = chronicle.get_confidence(memory.id, 1)
+    assert confidence.score == 0.7
+
+
+# --- drift detection ------------------------------------------------------
+
+
+def _git(repo: Path, *args: str):
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _init_repo(repo: Path) -> Path:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Chronicle Test")
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('hi')\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _branch(repo: Path) -> str:
+    return _git(repo, "branch", "--show-current").stdout.strip()
+
+
+def test_detect_drift_clean(chronicle: Chronicle, project_id: str, tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    chronicle.create_memory(
+        project_id=project_id,
+        content="knowledge",
+        git_branch=_branch(repo),
+        git_commit=_head(repo),
+    )
+
+    report = chronicle.detect_drift(project_id, repo_path=str(repo))
+
+    assert report.project_id == project_id
+    assert report.state == "clean"
+    assert report.changed_artifacts == []
+    assert report.affected_knowledge == []
+    assert report.__class__.__module__ == "chronicle.api.schemas"
+
+
+def test_detect_drift_dirty(chronicle: Chronicle, project_id: str, tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    chronicle.create_memory(project_id=project_id, content="knowledge", git_commit="deadbeef")
+
+    report = chronicle.detect_drift(project_id, repo_path=str(repo))
+
+    assert report.state == "dirty"
+    assert len(report.affected_knowledge) == 1
+    assert "recorded commit" in report.affected_knowledge[0].reason
+
+
+def test_detect_drift_unknown_project_raises(chronicle: Chronicle):
+    with pytest.raises(ProjectNotFoundError):
+        chronicle.detect_drift("missing")
+
+
+def test_detect_drift_read_only(chronicle: Chronicle, project_id: str, tmp_path: Path):
+    repo = _init_repo(tmp_path / "repo")
+    memory = chronicle.create_memory(
+        project_id=project_id, content="knowledge", git_commit=_head(repo)
+    )
+    chronicle.record_confidence(memory.id, 1, 0.7)
+
+    (repo / "README.md").write_text("readme")
+    chronicle.detect_drift(project_id, repo_path=str(repo))
+
+    fetched = chronicle.get_memory(memory.id)
+    assert fetched.versions[0].content == "knowledge"
     confidence = chronicle.get_confidence(memory.id, 1)
     assert confidence.score == 0.7

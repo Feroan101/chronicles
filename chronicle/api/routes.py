@@ -4,6 +4,8 @@ from chronicle.api.deps import Engine
 from chronicle.api.schemas import (
     ConfidenceRead,
     ConfidenceRecord,
+    DriftAffectedKnowledgeRead,
+    DriftReportRead,
     EvidenceRead,
     MemoryCreate,
     MemoryRead,
@@ -335,3 +337,38 @@ def verify_version(memory_id: str, sequence: int, engine: Engine) -> Verificatio
 )
 def verify_snapshot(snapshot_id: str, engine: Engine) -> VerificationReportRead:
     return _verification_report(engine.verify_snapshot(snapshot_id=snapshot_id))
+
+
+# ------------------------------------------------------------------
+# Drift detection endpoints
+# ------------------------------------------------------------------
+
+
+def _drift_report(report) -> DriftReportRead:
+    return DriftReportRead(
+        project_id=report.project_id,
+        state=report.state,
+        changed_artifacts=report.changed_artifacts,
+        affected_knowledge=[
+            DriftAffectedKnowledgeRead(
+                memory_id=k.memory_id,
+                sequence=k.sequence,
+                content=k.content,
+                reason=k.reason,
+            )
+            for k in report.affected_knowledge
+        ],
+        reasons=report.reasons,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/drift",
+    response_model=DriftReportRead,
+)
+def detect_drift(
+    project_id: str,
+    engine: Engine,
+    repo_path: str | None = Query(default=None),
+) -> DriftReportRead:
+    return _drift_report(engine.detect_drift(project_id=project_id, repo_path=repo_path))

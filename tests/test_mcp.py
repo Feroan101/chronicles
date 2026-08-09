@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -87,6 +88,7 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "verify_memory",
             "verify_version",
             "verify_snapshot",
+            "detect_drift",
         }
 
 
@@ -99,6 +101,7 @@ async def test_tool_input_schemas(server_dir):
         assert set(tools["create_memory"]["required"]) == {"project_id", "content"}
         assert set(tools["get_project"]["required"]) == {"project_id"}
         assert set(tools["search"]["required"]) == {"query"}
+        assert set(tools["detect_drift"]["required"]) == {"project_id"}
 
 
 @pytest.mark.anyio
@@ -634,3 +637,95 @@ async def test_verify_snapshot_unknown_snapshot_errors(server_dir):
     async with _session(server_dir) as session:
         message = await _err(session, "verify_snapshot", {"snapshot_id": "missing"})
         assert "Snapshot not found: missing" in message
+
+
+# ------------------------------------------------------------------
+# Drift detection MCP tests
+# ------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str):
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _init_repo(repo: Path) -> Path:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Chronicle Test")
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "main.py").write_text("print('hi')\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _branch(repo: Path) -> str:
+    return _git(repo, "branch", "--show-current").stdout.strip()
+
+
+@pytest.mark.anyio
+async def test_detect_drift_clean(server_dir):
+    repo = _init_repo(server_dir / "repo")
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(
+            session,
+            "create_memory",
+            {
+                "project_id": project["id"],
+                "content": "knowledge",
+                "git_commit": _head(repo),
+                "git_branch": _branch(repo),
+            },
+        )
+
+        report = await _ok(
+            session,
+            "detect_drift",
+            {"project_id": project["id"], "repo_path": str(repo)},
+        )
+
+        assert report["project_id"] == project["id"]
+        assert report["state"] == "clean"
+        assert report["changed_artifacts"] == []
+        assert report["affected_knowledge"] == []
+
+
+@pytest.mark.anyio
+async def test_detect_drift_dirty(server_dir):
+    repo = _init_repo(server_dir / "repo")
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "knowledge", "git_commit": "deadbeef"},
+        )
+
+        report = await _ok(
+            session,
+            "detect_drift",
+            {"project_id": project["id"], "repo_path": str(repo)},
+        )
+
+        assert report["state"] == "dirty"
+        assert len(report["affected_knowledge"]) == 1
+        assert "recorded commit" in report["affected_knowledge"][0]["reason"]
+
+
+@pytest.mark.anyio
+async def test_detect_drift_unknown_project_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "detect_drift", {"project_id": "missing"})
+        assert "Project not found: missing" in message

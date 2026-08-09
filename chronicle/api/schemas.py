@@ -216,3 +216,23 @@ class VerificationReportRead(BaseModel):
     results: list[VerificationResultRead]
     passed: bool
     has_failures: bool
+
+
+# ------------------------------------------------------------------
+# Drift detection schemas
+# ------------------------------------------------------------------
+
+
+class DriftAffectedKnowledgeRead(BaseModel):
+    memory_id: str
+    sequence: int
+    content: str
+    reason: str
+
+
+class DriftReportRead(BaseModel):
+    project_id: str
+    state: str
+    changed_artifacts: list[str]
+    affected_knowledge: list[DriftAffectedKnowledgeRead]
+    reasons: list[str]
