@@ -1003,9 +1003,7 @@ def test_create_and_list_branches(client, project_id):
     assert len(branches) == 1
     assert branches[0]["is_default"] is True
 
-    response = client.post(
-        f"/projects/{project_id}/branches", json={"name": "experimental"}
-    )
+    response = client.post(f"/projects/{project_id}/branches", json={"name": "experimental"})
     assert response.status_code == 201
     branch = response.json()
     assert branch["name"] == "experimental"
@@ -1017,9 +1015,7 @@ def test_create_and_list_branches(client, project_id):
 
 def test_create_branch_duplicate_name_returns_409(client, project_id):
     client.post(f"/projects/{project_id}/branches", json={"name": "experimental"})
-    response = client.post(
-        f"/projects/{project_id}/branches", json={"name": "experimental"}
-    )
+    response = client.post(f"/projects/{project_id}/branches", json={"name": "experimental"})
     assert response.status_code == 409
 
 

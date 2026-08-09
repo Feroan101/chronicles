@@ -223,9 +223,7 @@ class Chronicle:
         Returns the current version of every memory that belongs to the branch
         or was created before the branch forked.
         """
-        return [
-            _branch_knowledge(item) for item in self._engine.get_branch_knowledge(branch_id)
-        ]
+        return [_branch_knowledge(item) for item in self._engine.get_branch_knowledge(branch_id)]
 
     def create_memory(
         self,

@@ -137,9 +137,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
     # ------------------------------------------------------------------
 
     @server.tool()
-    def create_branch(
-        project_id: str, name: str, source_branch_id: str | None = None
-    ) -> dict:
+    def create_branch(project_id: str, name: str, source_branch_id: str | None = None) -> dict:
         """Create a new branch in a project.
 
         Branches hold independent lines of knowledge. New branches start from
@@ -337,9 +335,7 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
         return [EvidenceRead.model_validate(e).model_dump(mode="json") for e in evidence]
 
     @server.tool()
-    def search(
-        query: str, project_id: str | None = None, branch_id: str | None = None
-    ) -> list:
+    def search(query: str, project_id: str | None = None, branch_id: str | None = None) -> list:
         """Search project knowledge.
 
         Only the current version of each memory is returned, and each memory

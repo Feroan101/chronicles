@@ -85,9 +85,7 @@ def get_project(project_id: str, engine: Engine) -> ProjectRead:
 # ------------------------------------------------------------------
 
 
-@router.post(
-    "/projects/{project_id}/branches", response_model=BranchRead, status_code=201
-)
+@router.post("/projects/{project_id}/branches", response_model=BranchRead, status_code=201)
 def create_branch(project_id: str, payload: BranchCreate, engine: Engine) -> BranchRead:
     return BranchRead.model_validate(
         engine.create_branch(
@@ -111,16 +109,12 @@ def get_branch(branch_id: str, engine: Engine) -> BranchRead:
     return BranchRead.model_validate(branch)
 
 
-@router.get(
-    "/projects/{project_id}/branches/current", response_model=BranchRead
-)
+@router.get("/projects/{project_id}/branches/current", response_model=BranchRead)
 def get_current_branch(project_id: str, engine: Engine) -> BranchRead:
     return BranchRead.model_validate(engine.get_current_branch(project_id))
 
 
-@router.post(
-    "/projects/{project_id}/branches/current", response_model=BranchRead
-)
+@router.post("/projects/{project_id}/branches/current", response_model=BranchRead)
 def switch_branch(project_id: str, payload: BranchSwitch, engine: Engine) -> BranchRead:
     return BranchRead.model_validate(engine.switch_branch(project_id, payload.name))
 

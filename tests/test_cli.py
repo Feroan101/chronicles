@@ -16,8 +16,15 @@ runner = CliRunner()
 
 @pytest.fixture()
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty project directory where Chronicle is initialized."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture()
+def project_dir_with_alembic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A project directory that happens to contain an ``alembic.ini``."""
     shutil.copy2(REPO_ROOT / "alembic.ini", tmp_path / "alembic.ini")
-    shutil.copytree(REPO_ROOT / "alembic", tmp_path / "alembic")
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -31,6 +38,17 @@ def _init(project_dir: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def _migration_heads(db_path: Path) -> set[str]:
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute("SELECT version_num FROM alembic_version").fetchall()
+    finally:
+        con.close()
+    return {row[0] for row in rows}
+
+
 def test_init_creates_dir_db_and_config(project_dir: Path):
     _init(project_dir)
     assert context.chronicle_dir().is_dir()
@@ -38,6 +56,36 @@ def test_init_creates_dir_db_and_config(project_dir: Path):
     assert context.config_path().is_file()
     config = json.loads(context.config_path().read_text())
     assert config["db"] == "chronicle.db"
+
+
+def test_init_applies_migrations_in_an_empty_directory(project_dir: Path):
+    assert not next(project_dir.iterdir(), None)
+    _init(project_dir)
+    assert _migration_heads(context.db_path()) == {"f8e261e677cb"}
+
+
+def test_init_works_when_project_contains_alembic_ini(project_dir_with_alembic: Path):
+    _init(project_dir_with_alembic)
+    assert context.db_path().is_file()
+    assert _migration_heads(context.db_path()) == {"f8e261e677cb"}
+
+
+def test_init_is_idempotent(project_dir: Path):
+    _init(project_dir)
+    heads = _migration_heads(context.db_path())
+    config_before = context.config_path().read_text()
+
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+    assert _migration_heads(context.db_path()) == heads
+    assert context.config_path().read_text() == config_before
+
+
+def test_init_does_not_create_files_in_project_root(project_dir: Path):
+    _init(project_dir)
+    assert (project_dir / ".chronicle").is_dir()
+    assert not (project_dir / "alembic.ini").exists()
+    assert not (project_dir / "alembic").exists()
 
 
 def test_command_without_init_fails(project_dir: Path):

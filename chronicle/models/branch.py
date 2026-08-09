@@ -17,9 +17,7 @@ if TYPE_CHECKING:
 
 class Branch(Base):
     __tablename__ = "branches"
-    __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_branches_project_id_name"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_branches_project_id_name"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
@@ -27,9 +25,7 @@ class Branch(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
-    project: Mapped[Project] = relationship(
-        back_populates="branches", foreign_keys=[project_id]
-    )
+    project: Mapped[Project] = relationship(back_populates="branches", foreign_keys=[project_id])
     members: Mapped[list[BranchMember]] = relationship(
         back_populates="branch", cascade="all, delete-orphan"
     )
