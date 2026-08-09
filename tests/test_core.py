@@ -639,3 +639,293 @@ def test_confidence_without_reason(engine):
 
     record = engine.record_confidence(memory_id=memory.id, sequence=1, score=0.6)
     assert record.reason is None
+
+
+# ------------------------------------------------------------------
+# Verification tests
+# ------------------------------------------------------------------
+
+
+def test_verify_project_passes(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge", type="fact")
+
+    report = engine.verify_project(project_id=project.id)
+
+    assert report.scope == "project"
+    assert report.scope_id == project.id
+    assert report.passed
+    assert not report.has_failures
+    assert len(report.results) > 0
+    assert all(r.outcome == "verified" for r in report.results)
+
+
+def test_verify_project_unknown_project_raises(engine):
+    from chronicle.core import ProjectNotFoundError
+
+    with pytest.raises(ProjectNotFoundError):
+        engine.verify_project(project_id="missing")
+
+
+def test_verify_project_with_relationships(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a", type="fact")
+    mem_b = engine.create_memory(project_id=project.id, content="b", type="fact")
+    engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+
+    report = engine.verify_project(project_id=project.id)
+
+    assert report.passed
+    rel_checks = [r for r in report.results if r.check == "relationship_consistency"]
+    assert len(rel_checks) == 1
+    assert rel_checks[0].outcome == "verified"
+
+
+def test_verify_project_inconclusive_without_evidence(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.verify_project(project_id=project.id)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert len(trace_checks) == 1
+    assert trace_checks[0].outcome == "inconclusive"
+
+
+def test_verify_project_traceable_with_type(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge", type="fact")
+
+    report = engine.verify_project(project_id=project.id)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert len(trace_checks) == 1
+    assert trace_checks[0].outcome == "verified"
+
+
+def test_verify_project_traceable_with_context(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge", context="always")
+
+    report = engine.verify_project(project_id=project.id)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert trace_checks[0].outcome == "verified"
+
+
+def test_verify_project_traceable_with_evidence(engine):
+    from chronicle.models import Evidence
+    from chronicle.storage import EvidenceRepository
+    from chronicle.utils.ids import new_uuid
+    from chronicle.utils.time import utcnow
+
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    with engine._transaction() as session:
+        EvidenceRepository(session).create(
+            Evidence(
+                id=new_uuid(),
+                memory_version_id=memory.versions[0].id,
+                evidence_type="commit",
+                ref="abc123",
+                recorded_at=utcnow(),
+            )
+        )
+
+    report = engine.verify_project(project_id=project.id)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert trace_checks[0].outcome == "verified"
+
+
+def test_verify_memory_passes(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge", type="fact")
+
+    report = engine.verify_memory(memory_id=memory.id)
+
+    assert report.scope == "memory"
+    assert report.scope_id == memory.id
+    assert report.passed
+
+
+def test_verify_memory_unknown_raises(engine):
+    from chronicle.core import MemoryNotFoundError
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.verify_memory(memory_id="missing")
+
+
+def test_verify_memory_version_integrity(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="v1", type="fact")
+    engine.create_version(memory_id=memory.id, content="v2")
+
+    report = engine.verify_memory(memory_id=memory.id)
+
+    seq_checks = [r for r in report.results if r.check == "version_sequence_order"]
+    assert len(seq_checks) == 1
+    assert seq_checks[0].outcome == "verified"
+
+
+def test_verify_version_passes(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge", context="ctx")
+
+    report = engine.verify_version(memory_id=memory.id, sequence=1)
+
+    assert report.scope == "version"
+    assert report.scope_id == f"{memory.id}:1"
+    assert report.passed
+    assert not report.has_failures
+    checks = {r.check: r.outcome for r in report.results}
+    assert checks["version_sequence_order"] == "verified"
+    assert checks["traceability"] == "verified"
+
+
+def test_verify_version_unknown_memory_raises(engine):
+    from chronicle.core import MemoryNotFoundError
+
+    with pytest.raises(MemoryNotFoundError):
+        engine.verify_version(memory_id="missing", sequence=1)
+
+
+def test_verify_version_unknown_sequence_raises(engine):
+    from chronicle.core import MemoryVersionNotFoundError
+
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    with pytest.raises(MemoryVersionNotFoundError):
+        engine.verify_version(memory_id=memory.id, sequence=99)
+
+
+def test_verify_version_inconclusive_without_evidence(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    report = engine.verify_version(memory_id=memory.id, sequence=1)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert len(trace_checks) == 1
+    assert trace_checks[0].outcome == "inconclusive"
+    assert "origin cannot be established" in trace_checks[0].message
+
+
+def test_verify_version_traceable_with_evidence(engine):
+    from chronicle.models import Evidence
+    from chronicle.storage import EvidenceRepository
+    from chronicle.utils.ids import new_uuid
+    from chronicle.utils.time import utcnow
+
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+
+    with engine._transaction() as session:
+        EvidenceRepository(session).create(
+            Evidence(
+                id=new_uuid(),
+                memory_version_id=memory.versions[0].id,
+                evidence_type="commit",
+                ref="abc123",
+                recorded_at=utcnow(),
+            )
+        )
+
+    report = engine.verify_version(memory_id=memory.id, sequence=1)
+
+    trace_checks = [r for r in report.results if r.check == "traceability"]
+    assert trace_checks[0].outcome == "verified"
+
+
+def test_verify_version_does_not_modify_knowledge(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge", context="ctx")
+
+    engine.verify_version(memory_id=memory.id, sequence=1)
+
+    fetched = engine.get_memory(memory.id)
+    assert len(fetched.versions) == 1
+    assert fetched.versions[0].content == "knowledge"
+    assert fetched.versions[0].context == "ctx"
+
+
+def test_verify_snapshot_passes(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="knowledge")
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    report = engine.verify_snapshot(snapshot_id=snapshot.id)
+
+    assert report.scope == "snapshot"
+    assert report.scope_id == snapshot.id
+    assert report.passed
+    member_checks = [r for r in report.results if r.check == "snapshot_member_version_exists"]
+    assert len(member_checks) == 1
+    assert member_checks[0].outcome == "verified"
+
+
+def test_verify_snapshot_unknown_raises(engine):
+    from chronicle.core import SnapshotNotFoundError
+
+    with pytest.raises(SnapshotNotFoundError):
+        engine.verify_snapshot(snapshot_id="missing")
+
+
+def test_verify_snapshot_with_relationships(engine):
+    project = engine.create_project(name="demo")
+    mem_a = engine.create_memory(project_id=project.id, content="a")
+    mem_b = engine.create_memory(project_id=project.id, content="b")
+    engine.create_relationship(
+        project_id=project.id,
+        from_memory_id=mem_a.id,
+        to_memory_id=mem_b.id,
+        type="caused_by",
+    )
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    report = engine.verify_snapshot(snapshot_id=snapshot.id)
+
+    rel_checks = [r for r in report.results if r.check == "snapshot_relationship_exists"]
+    assert len(rel_checks) == 1
+    assert rel_checks[0].outcome == "verified"
+
+
+def test_verify_snapshot_empty(engine):
+    project = engine.create_project(name="empty")
+    snapshot = engine.create_snapshot(project_id=project.id)
+
+    report = engine.verify_snapshot(snapshot_id=snapshot.id)
+
+    assert report.passed
+    assert len(report.results) == 0
+
+
+def test_verification_does_not_modify_knowledge(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge", type="fact")
+
+    engine.verify_project(project_id=project.id)
+
+    fetched = engine.get_memory(memory.id)
+    assert fetched.type == "fact"
+    assert len(fetched.versions) == 1
+    assert fetched.versions[0].content == "knowledge"
+
+
+def test_verification_does_not_modify_confidence(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, content="knowledge")
+    engine.record_confidence(memory_id=memory.id, sequence=1, score=0.8)
+
+    engine.verify_project(project_id=project.id)
+
+    confidence = engine.get_confidence(memory_id=memory.id, sequence=1)
+    assert confidence is not None
+    assert confidence.score == 0.8

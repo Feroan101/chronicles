@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,6 +17,7 @@ from chronicle.core.errors import (
     RelationshipNotFoundError,
     SearchQueryError,
     SelfRelationshipError,
+    SnapshotNotFoundError,
 )
 from chronicle.core.git import GitContext
 from chronicle.models import (
@@ -56,6 +57,32 @@ class SearchResult:
     memory: Memory
     version: MemoryVersion
     rank: float
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """Result of a single verification check."""
+
+    check: str
+    outcome: str  # "verified", "inconclusive", "failed"
+    message: str
+
+
+@dataclass(frozen=True)
+class VerificationReport:
+    """Report produced by a verification run."""
+
+    scope: str  # "project", "memory", "snapshot"
+    scope_id: str
+    results: list[VerificationResult] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        return all(r.outcome == "verified" for r in self.results)
+
+    @property
+    def has_failures(self) -> bool:
+        return any(r.outcome == "failed" for r in self.results)
 
 
 class ChronicleEngine:
@@ -497,3 +524,292 @@ class ChronicleEngine:
             if version is None:
                 raise MemoryVersionNotFoundError(memory_id, sequence)
             return ConfidenceRepository(session).list_by_version(version.id)
+
+    # ------------------------------------------------------------------
+    # Verification operations
+    # ------------------------------------------------------------------
+
+    def verify_project(self, project_id: str) -> VerificationReport:
+        """Verify all knowledge in a Project.
+
+        Checks every Memory's version integrity, traceability, and all
+        Relationship consistency within the Project.
+        """
+        with self._transaction() as session:
+            if ProjectRepository(session).get(project_id) is None:
+                raise ProjectNotFoundError(project_id)
+
+            results: list[VerificationResult] = []
+            memories = MemoryRepository(session).list_by_project(project_id)
+            memory_ids = {m.id for m in memories}
+
+            for memory in memories:
+                results.extend(self._verify_memory_in_session(session, memory, memory_ids))
+
+            relationships = RelationshipRepository(session).list_by_project(project_id)
+            for rel in relationships:
+                results.extend(self._verify_relationship_in_session(session, rel, memory_ids))
+
+            return VerificationReport(scope="project", scope_id=project_id, results=results)
+
+    def verify_memory(self, memory_id: str) -> VerificationReport:
+        """Verify a single Memory and its Relationships."""
+        with self._transaction() as session:
+            memory = MemoryRepository(session).get(memory_id)
+            if memory is None:
+                raise MemoryNotFoundError(memory_id)
+
+            results: list[VerificationResult] = []
+            memory_ids = {memory_id}
+            results.extend(self._verify_memory_in_session(session, memory, memory_ids))
+
+            relationships = RelationshipRepository(session).list_by_memory(memory_id)
+            for rel in relationships:
+                results.extend(self._verify_relationship_in_session(session, rel, memory_ids))
+
+            return VerificationReport(scope="memory", scope_id=memory_id, results=results)
+
+    def verify_version(self, memory_id: str, sequence: int) -> VerificationReport:
+        """Verify a single Memory Version against its available evidence.
+
+        Reports whether the target version exists within an ordered history
+        and whether its origin can be established from stored evidence.
+        """
+        with self._transaction() as session:
+            memory = MemoryRepository(session).get(memory_id)
+            if memory is None:
+                raise MemoryNotFoundError(memory_id)
+            version = MemoryVersionRepository(session).get_by_sequence(memory_id, sequence)
+            if version is None:
+                raise MemoryVersionNotFoundError(memory_id, sequence)
+
+            results: list[VerificationResult] = []
+
+            # Version integrity: the target version is part of an ordered history
+            versions = MemoryVersionRepository(session).list_by_memory(memory_id)
+            sequences = [v.sequence for v in versions]
+            expected = list(range(1, len(versions) + 1))
+            if sequences != expected:
+                results.append(
+                    VerificationResult(
+                        check="version_sequence_order",
+                        outcome="failed",
+                        message=(
+                            f"Memory {memory_id} has unexpected version sequence: {sequences}"
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    VerificationResult(
+                        check="version_sequence_order",
+                        outcome="verified",
+                        message=f"Memory {memory_id} versions are sequentially ordered",
+                    )
+                )
+
+            # Traceability: the target version preserves its origin
+            has_evidence = len(list(version.evidence)) > 0
+            has_context = version.context is not None
+            has_type = memory.type is not None
+            if has_evidence or has_context or has_type:
+                results.append(
+                    VerificationResult(
+                        check="traceability",
+                        outcome="verified",
+                        message=(
+                            f"Version v{sequence} of memory {memory_id} has origin information"
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    VerificationResult(
+                        check="traceability",
+                        outcome="inconclusive",
+                        message=(
+                            f"Version v{sequence} of memory {memory_id} has no "
+                            "evidence or context — origin cannot be established"
+                        ),
+                    )
+                )
+
+            return VerificationReport(
+                scope="version",
+                scope_id=f"{memory_id}:{sequence}",
+                results=results,
+            )
+
+    def verify_snapshot(self, snapshot_id: str) -> VerificationReport:
+        """Verify a Snapshot's captured state against current knowledge."""
+        with self._transaction() as session:
+            snapshot = SnapshotRepository(session).get(snapshot_id)
+            if snapshot is None:
+                raise SnapshotNotFoundError(snapshot_id)
+
+            results: list[VerificationResult] = []
+
+            # Verify each captured version still exists
+            for member in snapshot.members:
+                version = MemoryVersionRepository(session).get(member.memory_version_id)
+                if version is None:
+                    results.append(
+                        VerificationResult(
+                            check="snapshot_member_version_exists",
+                            outcome="failed",
+                            message=(
+                                f"Snapshot member references missing version "
+                                f"{member.memory_version_id}"
+                            ),
+                        )
+                    )
+                else:
+                    results.append(
+                        VerificationResult(
+                            check="snapshot_member_version_exists",
+                            outcome="verified",
+                            message=f"Version {version.id} exists (v{version.sequence})",
+                        )
+                    )
+
+            # Verify each captured relationship still exists
+            for snap_rel in snapshot.snapshot_relationships:
+                rel = RelationshipRepository(session).get(snap_rel.relationship_id)
+                if rel is None:
+                    results.append(
+                        VerificationResult(
+                            check="snapshot_relationship_exists",
+                            outcome="failed",
+                            message=(
+                                f"Snapshot relationship references missing "
+                                f"relationship {snap_rel.relationship_id}"
+                            ),
+                        )
+                    )
+                else:
+                    results.append(
+                        VerificationResult(
+                            check="snapshot_relationship_exists",
+                            outcome="verified",
+                            message=f"Relationship {rel.id} exists",
+                        )
+                    )
+
+            return VerificationReport(scope="snapshot", scope_id=snapshot_id, results=results)
+
+    def _verify_memory_in_session(
+        self,
+        session: Session,
+        memory: Memory,
+        known_memory_ids: set[str],
+    ) -> list[VerificationResult]:
+        """Verify a single Memory within an existing session."""
+        results: list[VerificationResult] = []
+
+        # Version integrity: at least one version
+        versions = MemoryVersionRepository(session).list_by_memory(memory.id)
+        if not versions:
+            results.append(
+                VerificationResult(
+                    check="version_integrity",
+                    outcome="failed",
+                    message=f"Memory {memory.id} has no versions",
+                )
+            )
+            return results
+
+        results.append(
+            VerificationResult(
+                check="version_integrity",
+                outcome="verified",
+                message=f"Memory {memory.id} has {len(versions)} version(s)",
+            )
+        )
+
+        # Version integrity: sequences are ordered and start at 1
+        sequences = [v.sequence for v in versions]
+        expected = list(range(1, len(versions) + 1))
+        if sequences != expected:
+            results.append(
+                VerificationResult(
+                    check="version_sequence_order",
+                    outcome="failed",
+                    message=(f"Memory {memory.id} has unexpected version sequence: {sequences}"),
+                )
+            )
+        else:
+            results.append(
+                VerificationResult(
+                    check="version_sequence_order",
+                    outcome="verified",
+                    message=f"Memory {memory.id} versions are sequentially ordered",
+                )
+            )
+
+        # Traceability: at least one version has evidence or context
+        current_version = versions[-1]
+        has_evidence = len(list(current_version.evidence)) > 0
+        has_context = current_version.context is not None
+        has_type = memory.type is not None
+        if has_evidence or has_context or has_type:
+            results.append(
+                VerificationResult(
+                    check="traceability",
+                    outcome="verified",
+                    message=f"Memory {memory.id} has origin information",
+                )
+            )
+        else:
+            results.append(
+                VerificationResult(
+                    check="traceability",
+                    outcome="inconclusive",
+                    message=(
+                        f"Memory {memory.id} has no evidence, context, "
+                        f"or type — origin cannot be established"
+                    ),
+                )
+            )
+
+        return results
+
+    def _verify_relationship_in_session(
+        self,
+        session: Session,
+        rel: Relationship,
+        known_memory_ids: set[str],
+    ) -> list[VerificationResult]:
+        """Verify a single Relationship within an existing session."""
+        results: list[VerificationResult] = []
+
+        # Both memories must exist in the same project
+        from_ok = rel.from_memory_id in known_memory_ids
+        to_ok = rel.to_memory_id in known_memory_ids
+
+        if from_ok and to_ok:
+            results.append(
+                VerificationResult(
+                    check="relationship_consistency",
+                    outcome="verified",
+                    message=(
+                        f"Relationship {rel.id} connects existing memories within the project"
+                    ),
+                )
+            )
+        else:
+            missing = []
+            if not from_ok:
+                missing.append(f"from={rel.from_memory_id}")
+            if not to_ok:
+                missing.append(f"to={rel.to_memory_id}")
+            results.append(
+                VerificationResult(
+                    check="relationship_consistency",
+                    outcome="failed",
+                    message=(
+                        f"Relationship {rel.id} references missing memory: {', '.join(missing)}"
+                    ),
+                )
+            )
+
+        return results

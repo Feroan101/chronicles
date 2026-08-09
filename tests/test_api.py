@@ -59,6 +59,10 @@ def test_application_startup_serves_docs_and_schema(client):
         "/snapshots/{snapshot_id}",
         "/memories/{memory_id}/versions/{sequence}/confidence",
         "/memories/{memory_id}/versions/{sequence}/confidence/history",
+        "/projects/{project_id}/verify",
+        "/memories/{memory_id}/verify",
+        "/memories/{memory_id}/versions/{sequence}/verify",
+        "/snapshots/{snapshot_id}/verify",
     }
 
 
@@ -718,3 +722,117 @@ def test_get_confidence_history_empty(client, project_id):
     response = client.get(f"/memories/{memory['id']}/versions/1/confidence/history")
     assert response.status_code == 200
     assert response.json() == []
+
+
+# ------------------------------------------------------------------
+# Verification API tests
+# ------------------------------------------------------------------
+
+
+def test_verify_project(client, project_id):
+    _create_memory(client, project_id, "knowledge", type="fact")
+
+    response = client.post(f"/projects/{project_id}/verify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "project"
+    assert body["scope_id"] == project_id
+    assert body["passed"] is True
+    assert body["has_failures"] is False
+    assert len(body["results"]) > 0
+
+
+def test_verify_project_unknown_project_returns_404(client):
+    response = client.post("/projects/missing/verify")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Project not found: missing"}
+
+
+def test_verify_project_inconclusive_without_evidence(client, project_id):
+    _create_memory(client, project_id, "knowledge")
+
+    response = client.post(f"/projects/{project_id}/verify")
+    body = response.json()
+    trace_checks = [r for r in body["results"] if r["check"] == "traceability"]
+    assert len(trace_checks) == 1
+    assert trace_checks[0]["outcome"] == "inconclusive"
+
+
+def test_verify_memory(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge", type="fact").json()
+
+    response = client.post(f"/memories/{memory['id']}/verify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "memory"
+    assert body["scope_id"] == memory["id"]
+    assert body["passed"] is True
+
+
+def test_verify_memory_unknown_returns_404(client):
+    response = client.post("/memories/missing/verify")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Memory not found: missing"}
+
+
+def test_verify_version(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge", context="ctx").json()
+
+    response = client.post(f"/memories/{memory['id']}/versions/1/verify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "version"
+    assert body["scope_id"] == f"{memory['id']}:1"
+    assert body["passed"] is True
+    checks = {r["check"]: r["outcome"] for r in body["results"]}
+    assert checks["version_sequence_order"] == "verified"
+    assert checks["traceability"] == "verified"
+
+
+def test_verify_version_unknown_memory_returns_404(client):
+    response = client.post("/memories/missing/versions/1/verify")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Memory not found: missing"}
+
+
+def test_verify_version_unknown_sequence_returns_404(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+
+    response = client.post(f"/memories/{memory['id']}/versions/99/verify")
+    assert response.status_code == 404
+    assert "Memory version not found" in response.json()["detail"]
+
+
+def test_verify_snapshot(client, project_id):
+    _create_memory(client, project_id, "knowledge")
+    snapshot = client.post(
+        f"/projects/{project_id}/snapshots",
+        json={"message": "s"},
+    ).json()
+
+    response = client.post(f"/snapshots/{snapshot['id']}/verify")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "snapshot"
+    assert body["scope_id"] == snapshot["id"]
+    assert body["passed"] is True
+
+
+def test_verify_snapshot_unknown_returns_404(client):
+    response = client.post("/snapshots/missing/verify")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Snapshot not found: missing"}
+
+
+def test_verify_does_not_modify_confidence(client, project_id):
+    memory = _create_memory(client, project_id, "knowledge").json()
+    client.post(
+        f"/memories/{memory['id']}/versions/1/confidence",
+        json={"score": 0.7},
+    )
+
+    response = client.post(f"/projects/{project_id}/verify")
+    assert response.status_code == 200
+
+    confidence = client.get(f"/memories/{memory['id']}/versions/1/confidence")
+    assert confidence.json()["score"] == 0.7

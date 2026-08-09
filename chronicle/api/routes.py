@@ -20,6 +20,8 @@ from chronicle.api.schemas import (
     SearchHitRead,
     SnapshotCreate,
     SnapshotRead,
+    VerificationReportRead,
+    VerificationResultRead,
     VersionCreate,
 )
 from chronicle.core import (
@@ -283,3 +285,53 @@ def get_confidence(memory_id: str, sequence: int, engine: Engine) -> ConfidenceR
 def get_confidence_history(memory_id: str, sequence: int, engine: Engine) -> list[ConfidenceRead]:
     history = engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
     return [ConfidenceRead.model_validate(s) for s in history]
+
+
+# ------------------------------------------------------------------
+# Verification endpoints
+# ------------------------------------------------------------------
+
+
+def _verification_report(report) -> VerificationReportRead:
+    return VerificationReportRead(
+        scope=report.scope,
+        scope_id=report.scope_id,
+        results=[
+            VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+            for r in report.results
+        ],
+        passed=report.passed,
+        has_failures=report.has_failures,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/verify",
+    response_model=VerificationReportRead,
+)
+def verify_project(project_id: str, engine: Engine) -> VerificationReportRead:
+    return _verification_report(engine.verify_project(project_id=project_id))
+
+
+@router.post(
+    "/memories/{memory_id}/verify",
+    response_model=VerificationReportRead,
+)
+def verify_memory(memory_id: str, engine: Engine) -> VerificationReportRead:
+    return _verification_report(engine.verify_memory(memory_id=memory_id))
+
+
+@router.post(
+    "/memories/{memory_id}/versions/{sequence}/verify",
+    response_model=VerificationReportRead,
+)
+def verify_version(memory_id: str, sequence: int, engine: Engine) -> VerificationReportRead:
+    return _verification_report(engine.verify_version(memory_id=memory_id, sequence=sequence))
+
+
+@router.post(
+    "/snapshots/{snapshot_id}/verify",
+    response_model=VerificationReportRead,
+)
+def verify_snapshot(snapshot_id: str, engine: Engine) -> VerificationReportRead:
+    return _verification_report(engine.verify_snapshot(snapshot_id=snapshot_id))

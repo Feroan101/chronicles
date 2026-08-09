@@ -1,4 +1,9 @@
-from chronicle.core.engine import ChronicleEngine, SearchResult
+from chronicle.core.engine import (
+    ChronicleEngine,
+    SearchResult,
+    VerificationReport,
+    VerificationResult,
+)
 from chronicle.core.errors import (
     ChronicleError,
     ConfidenceScoreRangeError,
@@ -35,4 +40,6 @@ __all__ = [
     "SearchResult",
     "SelfRelationshipError",
     "SnapshotNotFoundError",
+    "VerificationReport",
+    "VerificationResult",
 ]

@@ -173,3 +173,54 @@ def test_search_command_invalid_query(project_dir: Path):
     result = runner.invoke(app, ["search", '"unterminated'])
     assert result.exit_code == 1
     assert "Invalid search query" in result.output
+
+
+def test_verify_workflow(project_dir: Path):
+    _init(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "create", "demo"]).output)
+    memory_id = _first_uuid(
+        runner.invoke(
+            app,
+            [
+                "memory",
+                "create",
+                "--project-id",
+                project_id,
+                "--content",
+                "knowledge",
+                "--type",
+                "fact",
+            ],
+        ).output
+    )
+
+    project = runner.invoke(app, ["verify", "project", "--project-id", project_id])
+    assert project.exit_code == 0, project.output
+    assert "PASSED" in project.output
+    assert "[+]" in project.output
+
+    memory = runner.invoke(app, ["verify", "memory", "--memory-id", memory_id])
+    assert memory.exit_code == 0, memory.output
+    assert "PASSED" in memory.output
+
+    version = runner.invoke(app, ["verify", "version", "--memory-id", memory_id, "--sequence", "1"])
+    assert version.exit_code == 0, version.output
+    assert "PASSED" in version.output
+
+
+def test_verify_unknown_errors(project_dir: Path):
+    _init(project_dir)
+
+    bad_project = runner.invoke(app, ["verify", "project", "--project-id", "bad-id"])
+    assert bad_project.exit_code == 1
+    assert "Project not found" in bad_project.output
+
+    bad_memory = runner.invoke(app, ["verify", "memory", "--memory-id", "bad-id"])
+    assert bad_memory.exit_code == 1
+    assert "Memory not found" in bad_memory.output
+
+    bad_version = runner.invoke(
+        app, ["verify", "version", "--memory-id", "bad-id", "--sequence", "1"]
+    )
+    assert bad_version.exit_code == 1
+    assert "Memory not found" in bad_version.output

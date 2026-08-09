@@ -31,6 +31,8 @@ from chronicle.api.schemas import (
     RelationshipRead,
     SearchHitRead,
     SnapshotRead,
+    VerificationReportRead,
+    VerificationResultRead,
 )
 from chronicle.core import (
     ChronicleEngine,
@@ -354,6 +356,69 @@ class Chronicle:
             for s in self._engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
         ]
 
+    # ------------------------------------------------------------------
+    # Verification methods
+    # ------------------------------------------------------------------
+
+    def verify_project(self, project_id: str) -> VerificationReportRead:
+        """Verify all knowledge in a project.
+
+        Checks version integrity, traceability, and relationship consistency.
+        """
+        report = self._engine.verify_project(project_id=project_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        )
+
+    def verify_memory(self, memory_id: str) -> VerificationReportRead:
+        """Verify a single memory and its relationships."""
+        report = self._engine.verify_memory(memory_id=memory_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        )
+
+    def verify_version(self, memory_id: str, sequence: int) -> VerificationReportRead:
+        """Verify a single memory version against its available evidence."""
+        report = self._engine.verify_version(memory_id=memory_id, sequence=sequence)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        )
+
+    def verify_snapshot(self, snapshot_id: str) -> VerificationReportRead:
+        """Verify a snapshot's captured state against current knowledge."""
+        report = self._engine.verify_snapshot(snapshot_id=snapshot_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        )
+
 
 __all__ = [
     "Chronicle",
@@ -383,4 +448,6 @@ __all__ = [
     "RelationshipRead",
     "SearchHitRead",
     "SnapshotRead",
+    "VerificationReportRead",
+    "VerificationResultRead",
 ]

@@ -197,3 +197,22 @@ class ConfidenceRead(BaseModel):
     score: float
     reason: str | None
     recorded_at: datetime
+
+
+# ------------------------------------------------------------------
+# Verification schemas
+# ------------------------------------------------------------------
+
+
+class VerificationResultRead(BaseModel):
+    check: str
+    outcome: str
+    message: str
+
+
+class VerificationReportRead(BaseModel):
+    scope: str
+    scope_id: str
+    results: list[VerificationResultRead]
+    passed: bool
+    has_failures: bool

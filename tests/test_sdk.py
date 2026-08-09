@@ -11,7 +11,12 @@ from chronicle.api.schemas import (
     ProjectRead,
     SearchHitRead,
 )
-from chronicle.core import MemoryNotFoundError, ProjectNotFoundError, SearchQueryError
+from chronicle.core import (
+    MemoryNotFoundError,
+    MemoryVersionNotFoundError,
+    ProjectNotFoundError,
+    SearchQueryError,
+)
 from chronicle.sdk import UNSET, Chronicle
 from pydantic import BaseModel
 from sqlalchemy import create_engine
@@ -322,3 +327,78 @@ def test_does_not_expose_orm_objects(chronicle: Chronicle, project_id: str):
     for result in (project, memory, version, hit):
         assert not hasattr(result, "_sa_instance_state")
         assert result.__class__.__module__ == "chronicle.api.schemas"
+
+
+# --- verification -----------------------------------------------------------
+
+
+def test_verify_project(chronicle: Chronicle, project_id: str):
+    _create_memory(chronicle, project_id, "knowledge", type="fact")
+
+    report = chronicle.verify_project(project_id)
+
+    assert report.scope == "project"
+    assert report.scope_id == project_id
+    assert report.passed is True
+    assert report.has_failures is False
+    assert len(report.results) > 0
+
+
+def test_verify_project_unknown_project_raises(chronicle: Chronicle):
+    with pytest.raises(ProjectNotFoundError):
+        chronicle.verify_project("missing")
+
+
+def test_verify_memory(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge", type="fact")
+
+    report = chronicle.verify_memory(memory.id)
+
+    assert report.scope == "memory"
+    assert report.scope_id == memory.id
+    assert report.passed is True
+
+
+def test_verify_memory_unknown_memory_raises(chronicle: Chronicle):
+    with pytest.raises(MemoryNotFoundError):
+        chronicle.verify_memory("missing")
+
+
+def test_verify_version(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge", context="ctx")
+
+    report = chronicle.verify_version(memory.id, 1)
+
+    assert report.scope == "version"
+    assert report.scope_id == f"{memory.id}:1"
+    assert report.passed is True
+    checks = {r.check: r.outcome for r in report.results}
+    assert checks["traceability"] == "verified"
+
+
+def test_verify_version_unknown_sequence_raises(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+
+    with pytest.raises(MemoryVersionNotFoundError):
+        chronicle.verify_version(memory.id, 99)
+
+
+def test_verify_snapshot(chronicle: Chronicle, project_id: str):
+    _create_memory(chronicle, project_id, "knowledge")
+    snapshot = chronicle.create_snapshot(project_id)
+
+    report = chronicle.verify_snapshot(snapshot.id)
+
+    assert report.scope == "snapshot"
+    assert report.scope_id == snapshot.id
+    assert report.passed is True
+
+
+def test_verify_does_not_modify_confidence(chronicle: Chronicle, project_id: str):
+    memory = _create_memory(chronicle, project_id, "knowledge")
+    chronicle.record_confidence(memory.id, 1, 0.7)
+
+    chronicle.verify_project(project_id)
+
+    confidence = chronicle.get_confidence(memory.id, 1)
+    assert confidence.score == 0.7

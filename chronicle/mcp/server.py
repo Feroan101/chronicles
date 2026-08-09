@@ -15,6 +15,8 @@ from chronicle.api.schemas import (
     RelationshipRead,
     SearchHitRead,
     SnapshotRead,
+    VerificationReportRead,
+    VerificationResultRead,
 )
 from chronicle.core import (
     ChronicleEngine,
@@ -425,6 +427,89 @@ def create_mcp_server(session_factory: sessionmaker[Session] | None = None) -> F
             ConfidenceRead.model_validate(s).model_dump(mode="json")
             for s in engine.get_confidence_history(memory_id=memory_id, sequence=sequence)
         ]
+
+    # ------------------------------------------------------------------
+    # Verification tools
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    def verify_project(project_id: str) -> dict:
+        """Verify all knowledge in a project.
+
+        Checks version integrity, traceability, and relationship consistency.
+
+        Args:
+            project_id: The project ID.
+        """
+        report = engine.verify_project(project_id=project_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        ).model_dump(mode="json")
+
+    @server.tool()
+    def verify_memory(memory_id: str) -> dict:
+        """Verify a single memory and its relationships.
+
+        Args:
+            memory_id: The memory ID.
+        """
+        report = engine.verify_memory(memory_id=memory_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        ).model_dump(mode="json")
+
+    @server.tool()
+    def verify_version(memory_id: str, sequence: int) -> dict:
+        """Verify a single memory version against its available evidence.
+
+        Args:
+            memory_id: The memory ID.
+            sequence: The version sequence number.
+        """
+        report = engine.verify_version(memory_id=memory_id, sequence=sequence)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        ).model_dump(mode="json")
+
+    @server.tool()
+    def verify_snapshot(snapshot_id: str) -> dict:
+        """Verify a snapshot's captured state against current knowledge.
+
+        Args:
+            snapshot_id: The snapshot ID.
+        """
+        report = engine.verify_snapshot(snapshot_id=snapshot_id)
+        return VerificationReportRead(
+            scope=report.scope,
+            scope_id=report.scope_id,
+            results=[
+                VerificationResultRead(check=r.check, outcome=r.outcome, message=r.message)
+                for r in report.results
+            ],
+            passed=report.passed,
+            has_failures=report.has_failures,
+        ).model_dump(mode="json")
 
     return server
 

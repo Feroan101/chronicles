@@ -83,6 +83,10 @@ async def test_server_initializes_and_exposes_contract_tools(server_dir):
             "record_confidence",
             "get_confidence",
             "get_confidence_history",
+            "verify_project",
+            "verify_memory",
+            "verify_version",
+            "verify_snapshot",
         }
 
 
@@ -515,3 +519,118 @@ async def test_record_confidence_out_of_range_errors(server_dir):
         )
         assert result.isError
         assert "between 0.0 and 1.0" in result.content[0].text
+
+
+# ------------------------------------------------------------------
+# Verification MCP tests
+# ------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_verify_project(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "knowledge", "type": "fact"},
+        )
+
+        report = await _ok(session, "verify_project", {"project_id": project["id"]})
+
+        assert report["scope"] == "project"
+        assert report["scope_id"] == project["id"]
+        assert report["passed"] is True
+        assert report["has_failures"] is False
+        assert len(report["results"]) > 0
+
+
+@pytest.mark.anyio
+async def test_verify_project_unknown_project_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "verify_project", {"project_id": "missing"})
+        assert "Project not found: missing" in message
+
+
+@pytest.mark.anyio
+async def test_verify_memory(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "knowledge", "type": "fact"},
+        )
+
+        report = await _ok(session, "verify_memory", {"memory_id": memory["id"]})
+
+        assert report["scope"] == "memory"
+        assert report["scope_id"] == memory["id"]
+        assert report["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_verify_memory_unknown_memory_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "verify_memory", {"memory_id": "missing"})
+        assert "Memory not found: missing" in message
+
+
+@pytest.mark.anyio
+async def test_verify_version(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session,
+            "create_memory",
+            {"project_id": project["id"], "content": "knowledge", "context": "ctx"},
+        )
+
+        report = await _ok(
+            session,
+            "verify_version",
+            {"memory_id": memory["id"], "sequence": 1},
+        )
+
+        assert report["scope"] == "version"
+        assert report["scope_id"] == f"{memory['id']}:1"
+        assert report["passed"] is True
+        checks = {r["check"]: r["outcome"] for r in report["results"]}
+        assert checks["traceability"] == "verified"
+
+
+@pytest.mark.anyio
+async def test_verify_version_unknown_sequence_errors(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        memory = await _ok(
+            session, "create_memory", {"project_id": project["id"], "content": "knowledge"}
+        )
+
+        message = await _err(
+            session,
+            "verify_version",
+            {"memory_id": memory["id"], "sequence": 99},
+        )
+        assert "Memory version not found" in message
+
+
+@pytest.mark.anyio
+async def test_verify_snapshot(server_dir):
+    async with _session(server_dir) as session:
+        project = await _ok(session, "create_project", {"name": "demo"})
+        await _ok(session, "create_memory", {"project_id": project["id"], "content": "knowledge"})
+        snapshot = await _ok(session, "create_snapshot", {"project_id": project["id"]})
+
+        report = await _ok(session, "verify_snapshot", {"snapshot_id": snapshot["id"]})
+
+        assert report["scope"] == "snapshot"
+        assert report["scope_id"] == snapshot["id"]
+        assert report["passed"] is True
+
+
+@pytest.mark.anyio
+async def test_verify_snapshot_unknown_snapshot_errors(server_dir):
+    async with _session(server_dir) as session:
+        message = await _err(session, "verify_snapshot", {"snapshot_id": "missing"})
+        assert "Snapshot not found: missing" in message
