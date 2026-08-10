@@ -100,6 +100,27 @@ Chronicle compares recorded knowledge context against the repository state and r
 
 ---
 
+## Chronicle + MCP
+
+Chronicle can expose persistent engineering knowledge to AI coding agents through MCP, letting agents retrieve context and reason about drift.
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/assets/chronicle-mcp-knowledge.png" width="420" alt="Knowledge Brief" />
+      <p><strong>Knowledge Brief</strong></p>
+      <p>Persistent engineering knowledge retrieved by an AI agent.</p>
+    </td>
+    <td align="center">
+      <img src="docs/assets/chronicle-mcp-drift-analysis.png" width="420" alt="Drift Analysis" />
+      <p><strong>Drift Analysis</strong></p>
+      <p>The agent identifies a contradiction between recorded knowledge and the current repository.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Architecture
 
 ```text
