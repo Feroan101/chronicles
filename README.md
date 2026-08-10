@@ -30,12 +30,13 @@ Chronicle tracks **project understanding**.
 </p>
 
 </div>
----
 
-## Overview
+---
 
 > [!NOTE]
 > This is a test note.
+
+## Overview
 
 Chronicle is a standalone infrastructure platform that enables AI coding agents to share persistent engineering knowledge across sessions, branches, and tools.
 
