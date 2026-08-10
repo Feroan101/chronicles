@@ -19,6 +19,9 @@ Chronicle tracks **project understanding**.
 
 <br>
 
+> [!NOTE]
+> This is a test note.
+
 <p align="center">
   <a href="#overview"><strong>Overview</strong></a> •
   <a href="#the-problem"><strong>Problem</strong></a> •
