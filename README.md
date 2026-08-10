@@ -82,6 +82,24 @@ Knowledge becomes searchable, verifiable, branch-aware, and versioned.
 
 ---
 
+## Chronicle in Action
+
+Chronicle versions engineering knowledge and detects when that knowledge drifts from the repository.
+
+### Knowledge Versioning
+
+Engineering decisions and facts are recorded as memories with a full version history. As knowledge evolves, every change stays traceable.
+
+![Knowledge versioning demo](docs/assets/demo-versioning.png)
+
+### Drift Detection
+
+Chronicle compares recorded knowledge context against the repository state and reports potentially affected knowledge.
+
+![Drift detection demo](docs/assets/demo-drift.png)
+
+---
+
 ## Architecture
 
 ```text
