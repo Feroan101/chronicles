@@ -27,10 +27,14 @@ if TYPE_CHECKING:
 
 class Memory(Base):
     __tablename__ = "memories"
-    __table_args__ = (UniqueConstraint("project_id", "id", name="uq_memories_project_id_id"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "id", name="uq_memories_project_id_id"),
+        UniqueConstraint("project_id", "name", name="uq_memories_project_id_name"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
     type: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 

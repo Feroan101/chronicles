@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from chronicle.models.base import Base
@@ -18,9 +18,11 @@ if TYPE_CHECKING:
 
 class Snapshot(Base):
     __tablename__ = "snapshots"
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_snapshots_project_id_name"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("snapshots.id"), nullable=True
     )

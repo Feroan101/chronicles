@@ -2,6 +2,7 @@ import typer
 
 from chronicle.cli import context as ctx
 from chronicle.cli.context import command_errors
+from chronicle.cli.resolvers import get_memory_id, get_project_id, get_snapshot_id
 
 verify_app = typer.Typer(help="Verify knowledge integrity and traceability.")
 
@@ -9,41 +10,69 @@ verify_app = typer.Typer(help="Verify knowledge integrity and traceability.")
 @verify_app.command("project")
 @command_errors
 def verify_project(
-    project_id: str = typer.Option(..., help="Project id to verify."),
+    project: str | None = typer.Option(None, help="Project name."),
+    project_id: str | None = typer.Option(None, help="Project UUID."),
 ) -> None:
     """Verify all knowledge in a project."""
-    report = ctx.engine().verify_project(project_id=project_id)
+    engine = ctx.engine()
+    project_uuid = get_project_id(engine, project=project, project_id=project_id)
+    report = engine.verify_project(project_id=project_uuid)
     _print_report(report)
 
 
 @verify_app.command("memory")
 @command_errors
 def verify_memory(
-    memory_id: str = typer.Option(..., help="Memory id to verify."),
+    memory: str | None = typer.Option(None, help="Memory name."),
+    memory_id: str | None = typer.Option(None, help="Memory UUID."),
+    project: str | None = typer.Option(None, help="Project name (scopes name lookup)."),
+    project_id: str | None = typer.Option(None, help="Project UUID."),
 ) -> None:
     """Verify a single memory and its relationships."""
-    report = ctx.engine().verify_memory(memory_id=memory_id)
+    engine = ctx.engine()
+    memory_uuid = get_memory_id(
+        engine, memory=memory, memory_id=memory_id, project=project, project_id=project_id
+    )
+    report = engine.verify_memory(memory_id=memory_uuid)
     _print_report(report)
 
 
 @verify_app.command("version")
 @command_errors
 def verify_version(
-    memory_id: str = typer.Option(..., help="Memory id of the version to verify."),
+    memory: str | None = typer.Option(None, help="Memory name."),
+    memory_id: str | None = typer.Option(None, help="Memory UUID."),
+    project: str | None = typer.Option(None, help="Project name (scopes name lookup)."),
+    project_id: str | None = typer.Option(None, help="Project UUID."),
     sequence: int = typer.Option(..., help="Version sequence to verify."),
 ) -> None:
     """Verify a single memory version against its available evidence."""
-    report = ctx.engine().verify_version(memory_id=memory_id, sequence=sequence)
+    engine = ctx.engine()
+    memory_uuid = get_memory_id(
+        engine, memory=memory, memory_id=memory_id, project=project, project_id=project_id
+    )
+    report = engine.verify_version(memory_id=memory_uuid, sequence=sequence)
     _print_report(report)
 
 
 @verify_app.command("snapshot")
 @command_errors
 def verify_snapshot(
-    snapshot_id: str = typer.Option(..., help="Snapshot id to verify."),
+    project: str | None = typer.Option(None, help="Project name."),
+    project_id: str | None = typer.Option(None, help="Project UUID."),
+    name: str | None = typer.Option(None, help="Snapshot name."),
+    snapshot_id: str | None = typer.Option(None, help="Snapshot UUID."),
 ) -> None:
     """Verify a snapshot's captured state against current knowledge."""
-    report = ctx.engine().verify_snapshot(snapshot_id=snapshot_id)
+    engine = ctx.engine()
+    resolved = get_snapshot_id(
+        engine,
+        project=project,
+        project_id=project_id,
+        snapshot_name=name,
+        snapshot_id=snapshot_id,
+    )
+    report = engine.verify_snapshot(snapshot_id=resolved)
     _print_report(report)
 
 

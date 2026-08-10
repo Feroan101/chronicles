@@ -1,6 +1,7 @@
 import subprocess
 from datetime import timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from chronicle.core import (
@@ -9,15 +10,21 @@ from chronicle.core import (
     CrossProjectRelationshipError,
     DecayConfigError,
     InvalidObservationActionError,
+    MemoryNameAmbiguousError,
+    MemoryNameConflictError,
     MemoryNotFoundError,
     MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
+    ProjectNameAmbiguousError,
+    ProjectNameConflictError,
     ProjectNotFoundError,
     RelationshipNotFoundError,
     SelfRelationshipError,
+    SnapshotNameConflictError,
+    SnapshotNotFoundError,
 )
-from chronicle.models import Base
+from chronicle.models import Base, Branch, Project
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -1496,3 +1503,106 @@ def test_assess_decay_does_not_affect_drift(engine, tmp_path):
     assert [k.reason for k in after.affected_knowledge] == [
         k.reason for k in before.affected_knowledge
     ]
+
+
+# ------------------------------------------------------------------
+# Human-readable identity layer
+# ------------------------------------------------------------------
+
+
+def test_project_name_conflict_raises(engine):
+    engine.create_project(name="demo")
+    with pytest.raises(ProjectNameConflictError):
+        engine.create_project(name="demo")
+
+
+def test_resolve_project_by_name(engine):
+    project = engine.create_project(name="demo")
+    assert engine.resolve_project("demo").id == project.id
+
+
+def test_resolve_project_unknown_name_raises(engine):
+    with pytest.raises(ProjectNotFoundError):
+        engine.resolve_project("missing")
+
+
+def test_resolve_project_ambiguous_name_raises(engine):
+
+    with engine._transaction() as session:
+        for _ in range(2):
+            project = Project(id=str(uuid4()), name="dup")
+            session.add(project)
+            session.flush()
+            branch = Branch(
+                id=str(uuid4()),
+                project_id=project.id,
+                name="main",
+                is_default=True,
+            )
+            session.add(branch)
+            project.default_branch_id = branch.id
+            project.current_branch_id = branch.id
+    with pytest.raises(ProjectNameAmbiguousError):
+        engine.resolve_project("dup")
+
+
+def test_create_memory_with_name(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, name="auth", content="x")
+    assert memory.name == "auth"
+    assert engine.get_memory_by_name(project.id, "auth").id == memory.id
+
+
+def test_create_memory_duplicate_name_raises(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, name="auth", content="x")
+    with pytest.raises(MemoryNameConflictError):
+        engine.create_memory(project_id=project.id, name="auth", content="y")
+
+
+def test_resolve_memory_by_name_in_project(engine):
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(project_id=project.id, name="auth", content="x")
+    resolved = engine.resolve_memory("auth", project_id=project.id)
+    assert resolved.id == memory.id
+
+
+def test_resolve_memory_by_name_globally(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, name="auth", content="x")
+    resolved = engine.resolve_memory("auth")
+    assert resolved.name == "auth"
+
+
+def test_resolve_memory_globally_ambiguous_raises(engine):
+    for name in ("a", "b"):
+        project = engine.create_project(name=name)
+        engine.create_memory(project_id=project.id, name="auth", content="x")
+    with pytest.raises(MemoryNameAmbiguousError):
+        engine.resolve_memory("auth")
+
+
+def test_resolve_memory_unknown_name_raises(engine):
+    with pytest.raises(MemoryNotFoundError):
+        engine.resolve_memory("missing")
+
+
+def test_create_snapshot_with_name(engine):
+    project = engine.create_project(name="demo")
+    engine.create_memory(project_id=project.id, content="x")
+    snapshot = engine.create_snapshot(project_id=project.id, name="initial")
+    assert snapshot.name == "initial"
+    assert engine.get_snapshot_by_name(project.id, "initial").id == snapshot.id
+
+
+def test_create_snapshot_duplicate_name_raises(engine):
+    project = engine.create_project(name="demo")
+    engine.create_snapshot(project_id=project.id, name="initial")
+    with pytest.raises(SnapshotNameConflictError):
+        engine.create_snapshot(project_id=project.id, name="initial")
+
+
+def test_resolve_snapshot_unknown_name_raises(engine):
+    project = engine.create_project(name="demo")
+    with pytest.raises(SnapshotNotFoundError):
+        engine.resolve_snapshot(project.id, "missing")

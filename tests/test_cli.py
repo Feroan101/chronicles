@@ -61,13 +61,13 @@ def test_init_creates_dir_db_and_config(project_dir: Path):
 def test_init_applies_migrations_in_an_empty_directory(project_dir: Path):
     assert not next(project_dir.iterdir(), None)
     _init(project_dir)
-    assert _migration_heads(context.db_path()) == {"f8e261e677cb"}
+    assert _migration_heads(context.db_path()) == {"620fffbacf7c"}
 
 
 def test_init_works_when_project_contains_alembic_ini(project_dir_with_alembic: Path):
     _init(project_dir_with_alembic)
     assert context.db_path().is_file()
-    assert _migration_heads(context.db_path()) == {"f8e261e677cb"}
+    assert _migration_heads(context.db_path()) == {"620fffbacf7c"}
 
 
 def test_init_is_idempotent(project_dir: Path):
@@ -370,7 +370,8 @@ def test_decay_command(project_dir: Path):
 
     result = runner.invoke(app, ["decay", "--project-id", project_id])
     assert result.exit_code == 0, result.output
-    assert f"Decay [project {project_id}]" in result.output
+    assert "Decay · demo" in result.output
+    assert project_id not in result.output
     assert "FRESH" in result.output
     assert "stale: 0" in result.output
 
@@ -390,3 +391,409 @@ def test_decay_unknown_project_errors(project_dir: Path):
     result = runner.invoke(app, ["decay", "--project-id", "bad-id"])
     assert result.exit_code == 1
     assert "Project not found" in result.output
+
+
+# ------------------------------------------------------------------
+# Human-readable identity layer
+# ------------------------------------------------------------------
+
+
+def _init_demo_project(project_dir: Path) -> None:
+    _init(project_dir)
+    result = runner.invoke(app, ["project", "create", "demo", "--description", "demo project"])
+    assert result.exit_code == 0, result.output
+
+
+def _create_named_memory(
+    project_dir: Path, name: str, content: str, type: str | None = None
+) -> None:
+    args = ["memory", "create", "--project", "demo", "--name", name, "--content", content]
+    if type:
+        args += ["--type", type]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+
+
+def test_project_list_and_show_by_name(project_dir: Path):
+    _init_demo_project(project_dir)
+
+    listed = runner.invoke(app, ["project", "list"])
+    assert listed.exit_code == 0, listed.output
+    assert "demo" in listed.output
+
+    shown = runner.invoke(app, ["project", "show", "--name", "demo"])
+    assert shown.exit_code == 0, shown.output
+    assert 'Project "demo"' in shown.output
+    assert "demo project" in shown.output
+
+
+def test_project_show_unknown_name_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    result = runner.invoke(app, ["project", "show", "--name", "missing"])
+    assert result.exit_code == 1
+    assert "Project not found" in result.output
+
+
+def test_project_show_conflicting_options_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "show", "--name", "demo"]).output)
+    result = runner.invoke(app, ["project", "show", "--name", "demo", "--project-id", project_id])
+    assert result.exit_code == 1
+    assert "not both" in result.output
+
+
+def test_project_duplicate_name_rejected(project_dir: Path):
+    _init(project_dir)
+    first = runner.invoke(app, ["project", "create", "demo"])
+    assert first.exit_code == 0, first.output
+    second = runner.invoke(app, ["project", "create", "demo"])
+    assert second.exit_code == 1
+    assert "Project name already exists" in second.output
+
+
+def test_memory_create_with_project_and_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    result = runner.invoke(
+        app,
+        [
+            "memory",
+            "create",
+            "--project",
+            "demo",
+            "--name",
+            "authentication",
+            "--content",
+            "JWT middleware protects routes.",
+            "--type",
+            "decision",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert 'Created memory "authentication"' in result.output
+    assert "current version: 1" in result.output
+    assert "decision" in result.output
+
+
+def test_memory_create_missing_project_errors(project_dir: Path):
+    _init(project_dir)
+    result = runner.invoke(app, ["memory", "create", "--content", "x", "--project-id", "missing"])
+    assert result.exit_code == 1
+    assert "Project not found" in result.output
+
+
+def test_memory_create_duplicate_name_rejected(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "first")
+    result = runner.invoke(
+        app, ["memory", "create", "--project", "demo", "--name", "auth", "--content", "dup"]
+    )
+    assert result.exit_code == 1
+    assert "Memory name already exists" in result.output
+
+
+def test_memory_list_by_project_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "content a")
+    _create_named_memory(project_dir, "tokens", "content b")
+
+    result = runner.invoke(app, ["memory", "list", "--project", "demo"])
+    assert result.exit_code == 0, result.output
+    assert "auth" in result.output
+    assert "tokens" in result.output
+    assert "seq 1" in result.output
+
+
+def test_memory_show_by_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT middleware")
+
+    result = runner.invoke(app, ["memory", "show", "--project", "demo", "--name", "auth"])
+    assert result.exit_code == 0, result.output
+    assert 'Memory "auth"' in result.output
+    assert "JWT middleware" in result.output
+    assert "Current version (sequence 1)" in result.output
+
+
+def test_memory_show_unknown_name_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    result = runner.invoke(app, ["memory", "show", "--project", "demo", "--name", "missing"])
+    assert result.exit_code == 1
+    assert "Memory not found" in result.output
+
+
+def test_memory_name_and_id_conflict_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    created = runner.invoke(
+        app, ["memory", "create", "--project", "demo", "--name", "auth", "--content", "x"]
+    )
+    assert created.exit_code == 0, created.output
+    memory_id = _first_uuid(created.output)
+    result = runner.invoke(
+        app,
+        ["memory", "show", "--project", "demo", "--name", "auth", "--memory-id", memory_id],
+    )
+    assert result.exit_code == 1
+    assert "not both" in result.output
+
+
+def test_memory_workflow_still_supports_uuids(project_dir: Path):
+    _init_demo_project(project_dir)
+    project_id = _first_uuid(runner.invoke(app, ["project", "show", "--name", "demo"]).output)
+    created = runner.invoke(
+        app,
+        [
+            "memory",
+            "create",
+            "--project-id",
+            project_id,
+            "--name",
+            "uuid-mem",
+            "--content",
+            "x",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    memory_id = _first_uuid(created.output)
+
+    shown = runner.invoke(app, ["memory", "show", "--memory-id", memory_id])
+    assert shown.exit_code == 0, shown.output
+    assert 'Memory "uuid-mem"' in shown.output
+
+
+def test_version_operations_with_memory_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "v1")
+
+    created = runner.invoke(app, ["version", "create", "--memory", "auth", "--content", "v2"])
+    assert created.exit_code == 0, created.output
+    assert "sequence: 2" in created.output
+
+    shown = runner.invoke(app, ["version", "show", "--memory", "auth", "--sequence", "2"])
+    assert shown.exit_code == 0, shown.output
+    assert "v2" in shown.output
+
+
+def test_version_with_memory_name_and_id_conflict(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "v1")
+    result = runner.invoke(
+        app, ["version", "show", "--memory", "auth", "--memory-id", "any-id", "--sequence", "1"]
+    )
+    assert result.exit_code == 1
+    assert "not both" in result.output
+
+
+def test_branch_operations_with_project_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    created = runner.invoke(
+        app, ["branch", "create", "--project", "demo", "--name", "auth-refactor"]
+    )
+    assert created.exit_code == 0, created.output
+    assert "Created branch auth-refactor" in created.output
+
+    listed = runner.invoke(app, ["branch", "list", "--project", "demo"])
+    assert listed.exit_code == 0, listed.output
+    assert "auth-refactor" in listed.output
+    assert "main" in listed.output
+
+    switched = runner.invoke(
+        app, ["branch", "switch", "--project", "demo", "--name", "auth-refactor"]
+    )
+    assert switched.exit_code == 0, switched.output
+
+    current = runner.invoke(app, ["branch", "current", "--project", "demo"])
+    assert current.exit_code == 0, current.output
+    assert "auth-refactor" in current.output
+
+
+def test_branch_operations_unknown_project_errors(project_dir: Path):
+    _init(project_dir)
+    result = runner.invoke(app, ["branch", "list", "--project", "missing"])
+    assert result.exit_code == 1
+    assert "Project not found" in result.output
+
+
+def test_relationship_operations_with_names(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "authentication", "JWT")
+    _create_named_memory(project_dir, "token-lifecycle", "one hour")
+    _create_named_memory(project_dir, "user-identity", "from JWT")
+
+    created = runner.invoke(
+        app,
+        [
+            "relationship",
+            "create",
+            "--project",
+            "demo",
+            "--from-memory",
+            "authentication",
+            "--to-memory",
+            "token-lifecycle",
+            "--type",
+            "depends_on",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    assert "authentication -> token-lifecycle" in created.output
+    assert "depends_on" in created.output
+
+    second = runner.invoke(
+        app,
+        [
+            "relationship",
+            "create",
+            "--project",
+            "demo",
+            "--from-memory",
+            "authentication",
+            "--to-memory",
+            "user-identity",
+            "--type",
+            "depends_on",
+        ],
+    )
+    assert second.exit_code == 0, second.output
+
+    listed = runner.invoke(app, ["relationship", "list", "--project", "demo"])
+    assert listed.exit_code == 0, listed.output
+    assert "authentication -> token-lifecycle" in listed.output
+
+    for_memory = runner.invoke(
+        app,
+        ["relationship", "for-memory", "--project", "demo", "--memory", "authentication"],
+    )
+    assert for_memory.exit_code == 0, for_memory.output
+    assert "authentication -> token-lifecycle" in for_memory.output
+    assert "authentication -> user-identity" in for_memory.output
+
+
+def test_relationship_unknown_memory_name_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    result = runner.invoke(
+        app,
+        [
+            "relationship",
+            "create",
+            "--project",
+            "demo",
+            "--from-memory",
+            "missing",
+            "--to-memory",
+            "also-missing",
+            "--type",
+            "depends_on",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Memory not found" in result.output
+
+
+def test_snapshot_operations_with_names(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "x")
+
+    created = runner.invoke(
+        app, ["snapshot", "create", "--project", "demo", "--name", "initial-auth"]
+    )
+    assert created.exit_code == 0, created.output
+    assert 'Created snapshot "initial-auth"' in created.output
+
+    listed = runner.invoke(app, ["snapshot", "list", "--project", "demo"])
+    assert listed.exit_code == 0, listed.output
+    assert "initial-auth" in listed.output
+
+    got = runner.invoke(app, ["snapshot", "get", "--project", "demo", "--name", "initial-auth"])
+    assert got.exit_code == 0, got.output
+    assert 'Snapshot "initial-auth"' in got.output
+
+
+def test_snapshot_duplicate_name_rejected(project_dir: Path):
+    _init_demo_project(project_dir)
+    runner.invoke(app, ["snapshot", "create", "--project", "demo", "--name", "snap"])
+    result = runner.invoke(app, ["snapshot", "create", "--project", "demo", "--name", "snap"])
+    assert result.exit_code == 1
+    assert "Snapshot name already exists" in result.output
+
+
+def test_snapshot_unknown_name_errors(project_dir: Path):
+    _init_demo_project(project_dir)
+    result = runner.invoke(app, ["snapshot", "get", "--project", "demo", "--name", "missing"])
+    assert result.exit_code == 1
+    assert "Snapshot not found" in result.output
+
+
+def test_confidence_operations_with_memory_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "x")
+
+    recorded = runner.invoke(
+        app,
+        ["confidence", "record", "--memory", "auth", "--sequence", "1", "--score", "0.9"],
+    )
+    assert recorded.exit_code == 0, recorded.output
+
+    shown = runner.invoke(app, ["confidence", "show", "--memory", "auth", "--sequence", "1"])
+    assert shown.exit_code == 0, shown.output
+    assert "0.9" in shown.output
+
+
+def test_verify_operations_with_names(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT", type="fact")
+
+    project_report = runner.invoke(app, ["verify", "project", "--project", "demo"])
+    assert project_report.exit_code == 0, project_report.output
+    assert "PASSED" in project_report.output
+
+    memory_report = runner.invoke(
+        app, ["verify", "memory", "--project", "demo", "--memory", "auth"]
+    )
+    assert memory_report.exit_code == 0, memory_report.output
+    assert "PASSED" in memory_report.output
+
+
+def test_drift_and_decay_with_project_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT", type="fact")
+
+    decay_result = runner.invoke(app, ["decay", "--project", "demo"])
+    assert decay_result.exit_code == 0, decay_result.output
+    assert "Decay · demo" in decay_result.output
+    assert "1 assessment(s)" in decay_result.output
+
+    drift_result = runner.invoke(app, ["drift", "--project", "demo"])
+    assert drift_result.exit_code == 0, drift_result.output
+    assert "Drift · demo" in drift_result.output
+
+
+def test_drift_renders_project_name_not_uuid(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT", type="fact")
+    project_id = _first_uuid(runner.invoke(app, ["project", "show", "--name", "demo"]).output)
+
+    result = runner.invoke(app, ["drift", "--project", "demo"])
+    assert result.exit_code == 0, result.output
+    assert "Drift · demo: CLEAN" in result.output
+    assert project_id not in result.output
+
+
+def test_drift_with_project_id_still_renders_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT", type="fact")
+    project_id = _first_uuid(runner.invoke(app, ["project", "show", "--name", "demo"]).output)
+
+    result = runner.invoke(app, ["drift", "--project-id", project_id])
+    assert result.exit_code == 0, result.output
+    assert "Drift · demo: CLEAN" in result.output
+    assert project_id not in result.output
+
+
+def test_search_with_project_name(project_dir: Path):
+    _init_demo_project(project_dir)
+    _create_named_memory(project_dir, "auth", "JWT middleware protects routes", type="decision")
+
+    result = runner.invoke(app, ["search", "JWT", "--project", "demo"])
+    assert result.exit_code == 0, result.output
+    assert '"auth"' in result.output
+    assert "project: demo" in result.output

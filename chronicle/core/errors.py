@@ -8,16 +8,50 @@ class ProjectNotFoundError(ChronicleError):
         self.project_id = project_id
 
 
+class ProjectNameConflictError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Project name already exists: {name}")
+        self.name = name
+
+
+class ProjectNameAmbiguousError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"Multiple projects are named {name!r}. Refer to the project by its UUID instead."
+        )
+        self.name = name
+
+
 class MemoryNotFoundError(ChronicleError):
     def __init__(self, memory_id: str) -> None:
         super().__init__(f"Memory not found: {memory_id}")
         self.memory_id = memory_id
 
 
+class MemoryNameConflictError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Memory name already exists in the project: {name}")
+        self.name = name
+
+
+class MemoryNameAmbiguousError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"Multiple memories named {name!r} exist. Provide a project with the memory name."
+        )
+        self.name = name
+
+
 class SnapshotNotFoundError(ChronicleError):
     def __init__(self, snapshot_id: str) -> None:
         super().__init__(f"Snapshot not found: {snapshot_id}")
         self.snapshot_id = snapshot_id
+
+
+class SnapshotNameConflictError(ChronicleError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Snapshot name already exists in the project: {name}")
+        self.name = name
 
 
 class BranchNotFoundError(ChronicleError):

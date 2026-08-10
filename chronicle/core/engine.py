@@ -14,14 +14,19 @@ from chronicle.core.errors import (
     CrossProjectRelationshipError,
     DecayConfigError,
     InvalidObservationActionError,
+    MemoryNameAmbiguousError,
+    MemoryNameConflictError,
     MemoryNotFoundError,
     MemoryVersionNotFoundError,
     ObservationAlreadyProcessedError,
     ObservationNotFoundError,
+    ProjectNameAmbiguousError,
+    ProjectNameConflictError,
     ProjectNotFoundError,
     RelationshipNotFoundError,
     SearchQueryError,
     SelfRelationshipError,
+    SnapshotNameConflictError,
     SnapshotNotFoundError,
 )
 from chronicle.core.git import GitContext, GitTree, read_git_tree
@@ -216,6 +221,8 @@ class ChronicleEngine:
 
     def create_project(self, name: str, description: str | None = None) -> Project:
         with self._transaction() as session:
+            if ProjectRepository(session).get_by_name(name):
+                raise ProjectNameConflictError(name)
             project = Project(id=new_uuid(), name=name, description=description)
             ProjectRepository(session).create(project)
             branch = Branch(
@@ -233,10 +240,33 @@ class ChronicleEngine:
         with self._transaction() as session:
             return ProjectRepository(session).get(project_id)
 
+    def list_projects(self) -> list[Project]:
+        with self._transaction() as session:
+            return ProjectRepository(session).list_all()
+
+    def get_project_by_name(self, name: str) -> Project | None:
+        with self._transaction() as session:
+            return ProjectRepository(session).get_by_name(name)
+
+    def resolve_project(self, name: str) -> Project:
+        """Resolve a Project by its human-readable name.
+
+        Raises ``ProjectNotFoundError`` when nothing matches and
+        ``ProjectNameAmbiguousError`` when several share the name.
+        """
+        with self._transaction() as session:
+            matches = ProjectRepository(session).list_by_name(name)
+            if not matches:
+                raise ProjectNotFoundError(name)
+            if len(matches) > 1:
+                raise ProjectNameAmbiguousError(name)
+            return matches[0]
+
     def create_memory(
         self,
         project_id: str,
         content: str,
+        name: str | None = None,
         type: str | None = None,
         context: str | None = None,
         git_context: GitContext | None = None,
@@ -245,8 +275,10 @@ class ChronicleEngine:
         with self._transaction() as session:
             if ProjectRepository(session).get(project_id) is None:
                 raise ProjectNotFoundError(project_id)
+            if name is not None and MemoryRepository(session).get_by_name(project_id, name):
+                raise MemoryNameConflictError(name)
             target_branch_id = self._resolve_branch_context(session, project_id, branch_id)
-            memory = Memory(id=new_uuid(), project_id=project_id, type=type)
+            memory = Memory(id=new_uuid(), project_id=project_id, name=name, type=type)
             MemoryRepository(session).create(memory)
             version = MemoryVersion(
                 id=new_uuid(),
@@ -267,6 +299,30 @@ class ChronicleEngine:
     def get_memory(self, memory_id: str) -> Memory | None:
         with self._transaction() as session:
             return MemoryRepository(session).get(memory_id)
+
+    def get_memory_by_name(self, project_id: str, name: str) -> Memory | None:
+        with self._transaction() as session:
+            return MemoryRepository(session).get_by_name(project_id, name)
+
+    def resolve_memory(self, name: str, project_id: str | None = None) -> Memory:
+        """Resolve a Memory by its human-readable name.
+
+        Within a project the name is unique, so an exact match is returned.
+        Without a project the name is searched across all projects; it must
+        be unique globally or ``MemoryNameAmbiguousError`` is raised.
+        """
+        with self._transaction() as session:
+            if project_id is not None:
+                memory = MemoryRepository(session).get_by_name(project_id, name)
+                if memory is None:
+                    raise MemoryNotFoundError(name)
+                return memory
+            matches = MemoryRepository(session).list_by_name(name)
+            if not matches:
+                raise MemoryNotFoundError(name)
+            if len(matches) > 1:
+                raise MemoryNameAmbiguousError(name)
+            return matches[0]
 
     def update_memory(self, memory_id: str, type: str | None = _UNSET) -> Memory:
         with self._transaction() as session:
@@ -744,7 +800,11 @@ class ChronicleEngine:
     # ------------------------------------------------------------------
 
     def create_snapshot(
-        self, project_id: str, message: str | None = None, branch_id: str | None = None
+        self,
+        project_id: str,
+        name: str | None = None,
+        message: str | None = None,
+        branch_id: str | None = None,
     ) -> Snapshot:
         """Create a Snapshot of a Project's knowledge state.
 
@@ -756,6 +816,8 @@ class ChronicleEngine:
             project = ProjectRepository(session).get(project_id)
             if project is None:
                 raise ProjectNotFoundError(project_id)
+            if name is not None and SnapshotRepository(session).get_by_name(project_id, name):
+                raise SnapshotNameConflictError(name)
 
             target_branch_id = None
             if branch_id is not None:
@@ -764,6 +826,7 @@ class ChronicleEngine:
             snapshot = Snapshot(
                 id=new_uuid(),
                 project_id=project_id,
+                name=name,
                 branch_id=target_branch_id,
                 message=message,
                 created_at=utcnow(),
@@ -820,6 +883,20 @@ class ChronicleEngine:
             if snapshot is not None:
                 _ = snapshot.members
                 _ = snapshot.snapshot_relationships
+            return snapshot
+
+    def get_snapshot_by_name(self, project_id: str, name: str) -> Snapshot | None:
+        with self._transaction() as session:
+            return SnapshotRepository(session).get_by_name(project_id, name)
+
+    def resolve_snapshot(self, project_id: str, name: str) -> Snapshot:
+        """Resolve a Snapshot by its human-readable name within a Project."""
+        with self._transaction() as session:
+            snapshot = SnapshotRepository(session).get_by_name(project_id, name)
+            if snapshot is None:
+                raise SnapshotNotFoundError(name)
+            _ = snapshot.members
+            _ = snapshot.snapshot_relationships
             return snapshot
 
     def list_snapshots(self, project_id: str, branch_id: str | None = None) -> list[Snapshot]:

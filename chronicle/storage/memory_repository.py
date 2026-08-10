@@ -38,6 +38,19 @@ class MemoryRepository(Repository):
             select(Memory).where(Memory.id == memory_id).options(self._load)
         ).one_or_none()
 
+    def get_by_name(self, project_id: str, name: str) -> Memory | None:
+        return self._session.scalars(
+            select(Memory)
+            .where(Memory.project_id == project_id, Memory.name == name)
+            .options(self._load)
+        ).one_or_none()
+
+    def list_by_name(self, name: str) -> list[Memory]:
+        """Return Memories sharing a name across all projects."""
+        return list(
+            self._session.scalars(select(Memory).where(Memory.name == name).options(self._load))
+        )
+
     def list_by_project(self, project_id: str) -> list[Memory]:
         return list(
             self._session.scalars(
