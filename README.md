@@ -19,21 +19,22 @@ Git tracks **source code**.
 Chronicle tracks **project understanding**.
 
 <br>
+</div>
 
 > [!NOTE]
 > Chronicle v1.0.0 has been released and tagged. The project is now in active V1 development.
 > The documentation below describes both the current foundation and the V1 target architecture.
 
-<p align="center">
-  <a href="#overview"><strong>Overview</strong></a> •
-  <a href="#the-problem"><strong>Problem</strong></a> •
-  <a href="#core-features"><strong>Features</strong></a> •
-  <a href="#architecture"><strong>Architecture</strong></a> •
-  <a href="#quick-start"><strong>Quick Start</strong></a> •
-  <a href="#documentation"><strong>Documentation</strong></a> •
-  <a href="#roadmap"><strong>Roadmap</strong></a>
-</p>
-
+<div align="center">
+  <p align="center">
+    <a href="#overview"><strong>Overview</strong></a> •
+    <a href="#the-problem"><strong>Problem</strong></a> •
+    <a href="#core-features"><strong>Features</strong></a> •
+    <a href="#architecture"><strong>Architecture</strong></a> •
+    <a href="#quick-start"><strong>Quick Start</strong></a> •
+    <a href="#documentation"><strong>Documentation</strong></a> •
+    <a href="#roadmap"><strong>Roadmap</strong></a>
+  </p>
 </div>
 
 ---
