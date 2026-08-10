@@ -32,6 +32,7 @@ Chronicle tracks **project understanding**.
 </div>
 > [!NOTE]
 > This is a test note.
+
 ---
 
 ## Overview
