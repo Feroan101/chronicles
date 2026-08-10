@@ -126,24 +126,76 @@ Chronicle can expose persistent engineering knowledge to AI coding agents throug
 
 ## Architecture
 
-```text
-                        AI Coding Agents
+Chronicle sits between AI coding agents and the project's persistent
+engineering knowledge.
 
- Claude Code   Cursor   Codex   OpenCode   Aider   Custom Agents
+```mermaid
+flowchart TB
 
-                               │
-                               ▼
+CLI["CLI"]
+API["REST API"]
+SDK["Python SDK"]
+MCP["MCP Server"]
 
-                      Chronicle Core Engine
+CORE["CHRONICLE<br/>Shared Knowledge Layer"]
 
-                               │
+MEM["Memories"]
+REL["Knowledge Graph"]
+OBS["Observations"]
+SNAP["Snapshots"]
 
-        ┌──────────────────────┴──────────────────────┐
-        │                                             │
- Knowledge Graph                             Snapshot Store
- Relationships                               Version History
- Evidence                                    Search
- Observations
+CONF["Confidence"]
+EVID["Evidence & Provenance"]
+VER["Verification"]
+DRIFT["Drift Detection"]
+DECAY["Memory Decay"]
+SEARCH["Full-Text Search"]
+
+DB[("SQLite<br/>+ Alembic")]
+
+CLI --> CORE
+API --> CORE
+SDK --> CORE
+MCP --> CORE
+
+CORE --> MEM
+CORE --> REL
+CORE --> OBS
+CORE --> SNAP
+
+MEM --> CONF
+MEM --> EVID
+MEM --> VER
+MEM --> DRIFT
+MEM --> DECAY
+MEM --> SEARCH
+
+REL --> SEARCH
+OBS --> VER
+OBS --> SNAP
+SNAP --> DRIFT
+
+MEM --> DB
+REL --> DB
+OBS --> DB
+SNAP --> DB
+
+classDef interface fill:#E8EEF5,stroke:#52677A,stroke-width:1.5px,color:#17212B;
+classDef core fill:#111111,stroke:#111111,stroke-width:2px,color:#FFFFFF;
+classDef knowledge fill:#E8F2EC,stroke:#557765,stroke-width:1.5px,color:#17251D;
+classDef intelligence fill:#F1EAF5,stroke:#765B82,stroke-width:1.5px,color:#241A29;
+classDef storage fill:#F3EBDD,stroke:#806D4F,stroke-width:1.5px,color:#2B2419;
+
+class CLI,API,SDK,MCP interface;
+class CORE core;
+class MEM,REL,OBS,SNAP knowledge;
+class CONF,EVID,VER,DRIFT,DECAY,SEARCH intelligence;
+class DB storage;
+
+linkStyle 0,1,2,3 stroke:#52677A,stroke-width:1.7px;
+linkStyle 4,5,6,7 stroke:#111111,stroke-width:2px;
+linkStyle 8,9,10,11,12,13,14,15,16 stroke:#765B82,stroke-width:1.5px;
+linkStyle 17,18,19,20 stroke:#806D4F,stroke-width:1.5px;
 ```
 
 Chronicle acts as the shared knowledge layer between AI coding agents and the software project.
