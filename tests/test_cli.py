@@ -789,6 +789,68 @@ def test_drift_with_project_id_still_renders_name(project_dir: Path):
     assert project_id not in result.output
 
 
+def test_drift_ignores_chronicle_internal_state(project_dir: Path):
+    _init_demo_project(project_dir)
+    _init_repo(project_dir)
+    created = runner.invoke(
+        app,
+        [
+            "memory",
+            "create",
+            "--project",
+            "demo",
+            "--name",
+            "auth",
+            "--type",
+            "fact",
+            "--content",
+            "JWT middleware",
+            "--git-commit",
+            _head(project_dir),
+            "--git-branch",
+            _branch(project_dir),
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    (project_dir / "auth.md").write_text("auth design")
+
+    result = runner.invoke(app, ["drift", "--project", "demo"])
+    assert result.exit_code == 0, result.output
+    assert "DIRTY" in result.output
+    assert "changed artifact: auth.md" in result.output
+    assert ".chronicle" not in result.output
+
+
+def test_drift_renders_named_memory_instead_of_uuid(project_dir: Path):
+    _init_demo_project(project_dir)
+    _init_repo(project_dir)
+    created = runner.invoke(
+        app,
+        [
+            "memory",
+            "create",
+            "--project",
+            "demo",
+            "--name",
+            "tokens",
+            "--type",
+            "fact",
+            "--content",
+            "JWT expires in 15 minutes",
+            "--git-commit",
+            "deadbeef",
+        ],
+    )
+    assert created.exit_code == 0, created.output
+    memory_id = _first_uuid(created.output)
+
+    result = runner.invoke(app, ["drift", "--project", "demo"])
+    assert result.exit_code == 0, result.output
+    assert "affected knowledge: tokens v1" in result.output
+    assert "recorded commit differs from current HEAD" in result.output
+    assert memory_id not in result.output
+
+
 def test_search_with_project_name(project_dir: Path):
     _init_demo_project(project_dir)
     _create_named_memory(project_dir, "auth", "JWT middleware protects routes", type="decision")

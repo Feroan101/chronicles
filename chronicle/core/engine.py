@@ -29,7 +29,12 @@ from chronicle.core.errors import (
     SnapshotNameConflictError,
     SnapshotNotFoundError,
 )
-from chronicle.core.git import GitContext, GitTree, read_git_tree
+from chronicle.core.git import (
+    DEFAULT_BRANCH_ALIASES,
+    GitContext,
+    GitTree,
+    read_git_tree,
+)
 from chronicle.models import (
     Branch,
     ConfidenceScore,
@@ -198,6 +203,19 @@ def _naive_utc(value: datetime) -> datetime:
     if value.tzinfo is not None:
         return value.astimezone(UTC).replace(tzinfo=None)
     return value
+
+
+def _is_default_branch_alias_mismatch(recorded_branch: str, tree: GitTree) -> bool:
+    """True when a branch mismatch is only the main/master aliasing on the default branch.
+
+    Knowledge recorded against ``main`` or ``master`` refers to the repository's
+    default development line. When the repo is checked out on its default branch
+    under the other conventional name, the name difference is a rename artifact,
+    not knowledge drift; commit/HEAD and working-tree comparisons still govern.
+    """
+    if tree.default_branch is None or tree.current_branch != tree.default_branch:
+        return False
+    return {recorded_branch, tree.current_branch} <= set(DEFAULT_BRANCH_ALIASES)
 
 
 class ChronicleEngine:
@@ -1292,24 +1310,36 @@ class ChronicleEngine:
             changed = set(tree.changed_files)
             has_reference = False
             affected: list[DriftAffectedKnowledge] = []
+            stale_reasons: list[str] = []
+            priority = {"commit": 0, "branch": 1}
             for memory in MemoryRepository(session).list_by_project(project_id):
                 current = MemoryVersionRepository(session).highest_version(memory.id)
                 if current is None:
                     continue
+                best_reason: str | None = None
+                best_priority = len(priority)
                 for evidence in current.evidence:
                     if evidence.evidence_type != "description":
                         has_reference = True
                     reason = self._evidence_drift_reason(evidence, tree, changed)
                     if reason is None:
                         continue
-                    affected.append(
-                        DriftAffectedKnowledge(
-                            memory_id=memory.id,
-                            sequence=current.sequence,
-                            content=current.content,
-                            reason=reason,
-                        )
+                    evidence_priority = priority.get(evidence.evidence_type, len(priority))
+                    if best_reason is None or evidence_priority < best_priority:
+                        best_priority = evidence_priority
+                        best_reason = reason
+                if best_reason is None:
+                    continue
+                affected.append(
+                    DriftAffectedKnowledge(
+                        memory_id=memory.id,
+                        sequence=current.sequence,
+                        content=current.content,
+                        reason=best_reason,
                     )
+                )
+                label = memory.name or memory.id
+                stale_reasons.append(f"memory {label} v{current.sequence} may be stale")
 
             if not has_reference:
                 return DriftReport(
@@ -1324,8 +1354,7 @@ class ChronicleEngine:
             reasons: list[str] = []
             if changed:
                 reasons.append(f"{len(changed)} changed artifact(s) in the working tree")
-            for knowledge in affected:
-                reasons.append(f"memory {knowledge.memory_id} v{knowledge.sequence} may be stale")
+            reasons.extend(stale_reasons)
 
             state = "dirty" if changed or affected else "clean"
             return DriftReport(
@@ -1348,16 +1377,14 @@ class ChronicleEngine:
                 tree.head_commit.startswith(evidence.ref)
                 or evidence.ref.startswith(tree.head_commit)
             ):
-                return (
-                    f"recorded commit {evidence.ref} does not match current HEAD "
-                    f"{tree.head_commit or '(none)'}"
-                )
+                return "recorded commit differs from current HEAD"
         elif evidence.evidence_type == "branch":
-            if tree.current_branch is not None and evidence.ref != tree.current_branch:
-                return (
-                    f"recorded branch {evidence.ref} does not match current branch "
-                    f"{tree.current_branch}"
-                )
+            if (
+                tree.current_branch is not None
+                and evidence.ref != tree.current_branch
+                and not _is_default_branch_alias_mismatch(evidence.ref, tree)
+            ):
+                return "recorded branch differs from current branch"
         else:
             if evidence.ref in changed:
                 return f"evidence reference {evidence.ref} has changed in the working tree"

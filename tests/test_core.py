@@ -1161,6 +1161,91 @@ def test_detect_drift_branch_mismatch_affected(engine, tmp_path):
     assert "recorded branch" in report.affected_knowledge[0].reason
 
 
+def test_detect_drift_ignores_chronicle_internal_state(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / ".chronicle").mkdir(exist_ok=True)
+    (repo / ".chronicle" / "chronicle.db").write_text("internal")
+    (repo / ".chronicle" / "config.json").write_text('{"db": "chronicle.db"}')
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo)),
+    )
+
+    (repo / "src" / "main.py").write_text("print('changed')\n")
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert report.changed_artifacts == ["src/main.py"]
+    assert all(not artifact.startswith(".chronicle") for artifact in report.changed_artifacts)
+    assert any("1 changed artifact" in reason for reason in report.reasons)
+
+
+def test_detect_drift_internal_state_alone_is_clean(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / ".chronicle").mkdir(exist_ok=True)
+    (repo / ".chronicle" / "chronicle.db").write_text("internal")
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(commit=_head(repo)),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.clean
+    assert report.changed_artifacts == []
+    assert report.affected_knowledge == []
+
+
+def test_detect_drift_single_stale_warning_per_memory(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    project = engine.create_project(name="demo")
+    memory = engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(branch="feature", commit="deadbeef"),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.dirty
+    assert len(report.affected_knowledge) == 1
+    assert report.affected_knowledge[0].memory_id == memory.id
+    assert report.affected_knowledge[0].sequence == 1
+    assert "recorded commit" in report.affected_knowledge[0].reason
+    stale = [r for r in report.reasons if "may be stale" in r]
+    assert len(stale) == 1
+
+
+def test_detect_drift_default_branch_alias_is_benign(engine, tmp_path):
+    from chronicle.core import GitContext
+
+    repo = _init_repo(tmp_path / "repo")
+    aliased = "master" if _branch(repo) == "main" else "main"
+    project = engine.create_project(name="demo")
+    engine.create_memory(
+        project_id=project.id,
+        content="knowledge",
+        git_context=GitContext(branch=aliased),
+    )
+
+    report = engine.detect_drift(project_id=project.id, repo_path=repo)
+
+    assert report.clean
+    assert report.affected_knowledge == []
+    assert not any("branch" in reason for reason in report.reasons)
+
+
 def test_detect_drift_no_git_context(engine, tmp_path):
     repo = _init_repo(tmp_path / "repo")
     project = engine.create_project(name="demo")

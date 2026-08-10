@@ -17,6 +17,15 @@ from pathlib import Path
 
 from chronicle.core.errors import GitContextError
 
+#: Chronicle's own state directory. Files under it are internal state, not
+#: project content, so a dirty ``.chronicle/`` tree never counts as drift.
+INTERNAL_STATE_DIR = ".chronicle"
+
+#: The two conventional names for Git's default branch across repos. Knowledge
+#: recorded against one of these names is treated as referring to the default
+#: development line, so a pure main<->master rename is not reported as drift.
+DEFAULT_BRANCH_ALIASES: tuple[str, str] = ("main", "master")
+
 
 @dataclass(frozen=True)
 class GitContext:
@@ -46,15 +55,24 @@ class GitContext:
 class GitTree:
     """A read-only snapshot of a Git working tree.
 
-    ``current_branch`` is None when HEAD is detached. ``head_commit`` is None
-    when the repository has no commits yet. ``changed_files`` lists paths with
-    uncommitted modifications, including untracked files.
+    ``current_branch`` is None when HEAD is detached. ``default_branch`` is the
+    repository's default branch name when it can be determined (from the origin
+    HEAD ref, or the sole local branch), otherwise None. ``head_commit`` is
+    None when the repository has no commits yet. ``changed_files`` lists paths
+    with uncommitted modifications, including untracked files, excluding
+    Chronicle's own ``.chronicle/`` state directory.
     """
 
     is_repo: bool
     current_branch: str | None = None
+    default_branch: str | None = None
     head_commit: str | None = None
     changed_files: list[str] = field(default_factory=list)
+
+
+def _is_internal_state(path: str) -> bool:
+    """True when ``path`` lives inside Chronicle's own state directory."""
+    return path.split("/", 1)[0] == INTERNAL_STATE_DIR
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -92,11 +110,33 @@ def read_git_tree(path: Path | str | None = None) -> GitTree:
     changed: list[str] = []
     for line in status_result.stdout.splitlines():
         if len(line) > 3:
-            changed.append(line[3:].strip())
+            path = line[3:].strip()
+            if not _is_internal_state(path):
+                changed.append(path)
 
     return GitTree(
         is_repo=True,
         current_branch=branch or None,
+        default_branch=_default_branch(target),
         head_commit=head or None,
         changed_files=changed,
     )
+
+
+def _default_branch(path: Path) -> str | None:
+    """Return the repository's default branch name when determinable.
+
+    Reads the local tracking ref that mirrors the default upstream branch, or,
+    for repositories with no remote, falls back to the single local branch.
+    The operation is read-only.
+    """
+    symbolic = _git(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if symbolic.returncode == 0 and symbolic.stdout.strip():
+        return symbolic.stdout.strip()
+
+    branches = _git(path, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    if branches.returncode == 0:
+        names = [line.strip() for line in branches.stdout.splitlines() if line.strip()]
+        if len(names) == 1:
+            return names[0]
+    return None

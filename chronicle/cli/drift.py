@@ -33,12 +33,13 @@ def _memory_label(engine, memory_id: str) -> str:
 def _print_report(engine, report, project_name: str) -> None:
     state = "DIRTY" if report.dirty else "CLEAN"
     typer.echo(f"Drift · {project_name}: {state}")
-    for reason in report.reasons:
-        typer.echo(f"  [~] {reason}")
+    if report.clean:
+        for reason in report.reasons:
+            typer.echo(f"  [~] {reason}")
+        return
     for artifact in report.changed_artifacts:
         typer.echo(f"  [!] changed artifact: {artifact}")
     for knowledge in report.affected_knowledge:
         label = _memory_label(engine, knowledge.memory_id)
-        typer.echo(
-            f"  [!] affected knowledge: memory {label} v{knowledge.sequence} — {knowledge.reason}"
-        )
+        typer.echo(f"  [!] affected knowledge: {label} v{knowledge.sequence}")
+        typer.echo(f"  [!] {knowledge.reason}")
