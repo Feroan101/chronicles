@@ -312,32 +312,46 @@ Constraints:
 
 ---
 
-## 7. Planned V1 Tables
+### 6.4 branches
 
-> [!NOTE]
-> The following tables are planned but not yet implemented.
+Stores Project branches. Knowledge follows Git-style branches.
 
-### 7.1 branches
-
-Stores branch references. A branch is a named pointer to a Snapshot.
-
-| Column            | Type      | Constraints                | Description                    |
-|-------------------|-----------|----------------------------|--------------------------------|
-| project_id        | TEXT      | NOT NULL, FK projects      | Owning Project.                |
-| name              | TEXT      | NOT NULL                   | Branch name.                   |
-| head_snapshot_id  | TEXT      | NOT NULL, FK snapshots     | Snapshot the branch points at. |
-| created_at        | TIMESTAMP | NOT NULL                   | Creation time (UTC).           |
-| updated_at        | TIMESTAMP | NOT NULL                   | Last move time (UTC).          |
+| Column            | Type      | Constraints                | Description                                 |
+|-------------------|-----------|----------------------------|---------------------------------------------|
+| id                | TEXT      | PRIMARY KEY                | Branch identity (UUID).                     |
+| project_id        | TEXT      | NOT NULL, FK projects      | Owning Project.                             |
+| name              | TEXT      | NOT NULL                   | Branch name.                                |
+| is_default        | BOOLEAN   | NOT NULL                   | Whether this is the Project's default branch |
+| created_at        | TIMESTAMP | NOT NULL                   | Creation time (UTC).                        |
 
 Constraints:
 
-* `PRIMARY KEY (project_id, name)` — a branch name is unique within a Project.
-* A branch points at a single Snapshot (its head).
-* Branch state is derived from the head Snapshot and its history.
+* `UNIQUE (project_id, name)` — a branch name is unique within a Project.
+* `projects.default_branch_id` and `projects.current_branch_id` point at a `branches` row.
+* `snapshots.branch_id` links a Snapshot to the branch it was captured on.
 
 ---
 
-## 8. Storage Abstraction
+### 6.5 branch_members
+
+Records which Memory Version is visible on each Branch.
+
+| Column             | Type      | Constraints                 | Description                         |
+|--------------------|-----------|-----------------------------|-------------------------------------|
+| branch_id          | TEXT      | NOT NULL, FK branches       | Owning Branch.                      |
+| memory_id          | TEXT      | NOT NULL, FK memories       | Memory in the Branch.               |
+| memory_version_id  | TEXT      | NOT NULL, FK memory_versions | Version visible on the Branch.     |
+| created_at         | TIMESTAMP | NOT NULL                    | Creation time (UTC).                |
+
+Constraints:
+
+* `PRIMARY KEY (branch_id, memory_id)`.
+* A Branch shows exactly one Version per Memory.
+* Adding a new Version updates the `branch_members` row for that branch.
+
+---
+
+## 7. Storage Abstraction
 
 The schema is accessed exclusively through the Storage Engine.
 
@@ -347,7 +361,7 @@ The Storage Engine is the only component that executes schema-level operations.
 
 ---
 
-## 9. Scope Boundaries
+## 8. Scope Boundaries
 
 This document defines the persistent data model for Version 1.
 

@@ -53,7 +53,7 @@ The following capabilities define the scope of Version 1.
 
 ## Included
 
-### Implemented (v0.1.0 Foundation)
+### Implemented (v1.0.0 Foundation)
 
 * Local-first operation
 * Repository-scoped knowledge
@@ -64,6 +64,11 @@ The following capabilities define the scope of Version 1.
 * Knowledge search (FTS5)
 * Git context integration (manual, explicit)
 * Snapshots (create, retrieve, list)
+* Branch-aware knowledge
+* Confidence scoring
+* Verification
+* Drift detection
+* Memory decay
 * CLI
 * REST API
 * Python SDK
@@ -71,11 +76,6 @@ The following capabilities define the scope of Version 1.
 
 ### Planned for V1
 
-* Confidence scoring
-* Verification
-* Drift detection
-* Memory decay
-* Branch-aware knowledge
 * Snapshot-based primary storage
 
 ---

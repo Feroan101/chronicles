@@ -111,7 +111,7 @@ It provides:
 
 ### Current Implementation
 
-SQLite is the storage engine for the v0.1.0 foundation release. It provides local-first operation, zero configuration, reliable persistence, and full-text search (FTS5).
+SQLite is the storage engine for the v1.0.0 foundation release. It provides local-first operation, zero configuration, reliable persistence, and full-text search (FTS5).
 
 SQLite MAY be used for local development or testing where appropriate.
 

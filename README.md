@@ -2,7 +2,7 @@
 
 # Chronicle
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Status](https://img.shields.io/badge/status-V1%20Development-blue)
 ![Python](https://img.shields.io/badge/python-3.13+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -21,7 +21,7 @@ Chronicle tracks **project understanding**.
 <br>
 
 > [!NOTE]
-> Chronicle v0.1.0 has been released and tagged. The project is now in active V1 development.
+> Chronicle v1.0.0 has been released and tagged. The project is now in active V1 development.
 > The documentation below describes both the current foundation and the V1 target architecture.
 
 <p align="center">
@@ -163,16 +163,19 @@ It continuously builds an understanding of the project while allowing every conn
 | Evidence | Every knowledge object records why it exists. |
 | Observations | Capture information before incorporating into project knowledge. |
 | Snapshots | Capture project knowledge state at a point in time. |
+| Branch-Aware Memory | Project knowledge follows Git branches. |
+| Confidence | Track the reliability of stored knowledge. |
+| Verification | Validate stored knowledge against the current project. |
+| Drift Detection | Detect when implementation and stored knowledge diverge. |
+| Memory Decay | Assess how fresh each memory has remained. |
 | Local First | Every repository owns its own Chronicle repository. |
+| Four Interfaces | CLI, REST API, Python SDK, and MCP server share the same core. |
 
 ### Planned for V1
 
 | Feature | Description |
 |----------|-------------|
-| Branch-Aware Memory | Project knowledge follows Git branches. |
-| Confidence | Track the reliability of stored knowledge. |
-| Verification | Validate stored knowledge against the current project. |
-| Drift Detection | Detect when implementation and stored knowledge diverge. |
+| Snapshot-Based Primary Storage | Knowledge evolves through snapshots instead of memory updates. |
 
 Detailed documentation for every feature is available in the documentation sections below.
 
@@ -196,21 +199,18 @@ Engineering knowledge is owned by Chronicle.
 
 ## Quick Start
 
-> [!WARNING]
-> The following commands represent the planned V1 CLI and may change during development.
-
 ```bash
 chronicle init
 
-chronicle snapshot
+chronicle project create demo
 
-chronicle status
+chronicle memory create --project demo --name auth --content "API authentication uses OIDC."
 
 chronicle search "authentication"
 
-chronicle verify
+chronicle snapshot create --project demo
 
-chronicle history
+chronicle drift --project demo
 ```
 
 ## Documentation
