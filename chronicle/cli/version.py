@@ -66,7 +66,6 @@ def show(
     memory = engine.get_memory(memory_uuid)
     label = memory.name if memory and memory.name else memory_uuid
     typer.echo(f'Version v{version.sequence} of "{label}"')
-    typer.echo(f"  id: {version.id}")
     typer.echo(f"  sequence: {version.sequence}")
     typer.echo(f"  content: {version.content}")
     if version.context:

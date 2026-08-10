@@ -568,9 +568,13 @@ def test_version_operations_with_memory_name(project_dir: Path):
     assert created.exit_code == 0, created.output
     assert "sequence: 2" in created.output
 
-    shown = runner.invoke(app, ["version", "show", "--memory", "auth", "--sequence", "2"])
-    assert shown.exit_code == 0, shown.output
-    assert "v2" in shown.output
+    for sequence, content in [("1", "v1"), ("2", "v2")]:
+        shown = runner.invoke(app, ["version", "show", "--memory", "auth", "--sequence", sequence])
+        assert shown.exit_code == 0, shown.output
+        assert shown.output.startswith(f'Version v{sequence} of "auth"')
+        assert f"  sequence: {sequence}" in shown.output
+        assert content in shown.output
+        assert "id:" not in shown.output
 
 
 def test_version_with_memory_name_and_id_conflict(project_dir: Path):
